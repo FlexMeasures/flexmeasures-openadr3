@@ -1,0 +1,140 @@
+{% extends "base_flexmeasures_openadr3.html" %}
+
+{% block title %} VEN client details {% endblock %}
+
+{% block divs %}
+<link rel="stylesheet" href="{{ url_for('flexmeasures-openadr3 UI.static', filename='css/ven-client-field-help.css') }}">
+<div class="container py-3">
+  <div class="row justify-content-center">
+    <div class="col-12 col-xl-9">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2 class="h5 mb-0">VEN client: {{ ven_client.name }}</h2>
+          <div class="d-flex gap-2">
+            <a href="{{ url_for('.sensor_configs_overview', ven_id=ven_client.id) }}" class="btn btn-outline-secondary btn-sm">Polling schedules</a>
+            <a href="{{ url_for('.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-muted mb-3">
+            These are the static connection settings that the VEN uses to authenticate with and
+            reach the VTN. They are shared across all polling schedules for this VEN client.
+          </p>
+          <form method="post" action="{{ url_for('.ven_client_update', ven_id=ven_client.id) }}">
+            <div class="row g-3">
+              <div class="col-12">
+                <label for="name" class="form-label">
+                  <span class="field-label-with-help">
+                    Name
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="Name field info">i</span>
+                      <span class="field-help-tooltip">Descriptive name of the VEN client in flexmeasures, does not need to align with ven name in VTN, simply used for readability purposes here.</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="name" name="name" type="text" class="form-control{% if form_errors.name %} is-invalid{% endif %}" value="{{ form_values.name }}" required>
+                {% if form_errors.name %}
+                <div class="invalid-feedback">{{ form_errors.name }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12">
+                <label for="vtn_url" class="form-label">
+                  <span class="field-label-with-help">
+                    VTN URL
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="VTN URL field info">i</span>
+                      <span class="field-help-tooltip">The BASE url of the VTN that the VEN client communicates with to retrieve DR signals</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="vtn_url" name="vtn_url" type="url" class="form-control{% if form_errors.vtn_url %} is-invalid{% endif %}" value="{{ form_values.vtn_url }}" placeholder="https://vtn.example.com/oadr3" required>
+                {% if form_errors.vtn_url %}
+                <div class="invalid-feedback">{{ form_errors.vtn_url }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label for="oauth_client_id" class="form-label">
+                  <span class="field-label-with-help">
+                    OAuth client ID
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="OAuth client ID field info">i</span>
+                      <span class="field-help-tooltip">the oauth client ID used by the VEN client to retrieve an access token to authenticate to the VTN.</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="oauth_client_id" name="oauth_client_id" type="text" class="form-control{% if form_errors.oauth_client_id %} is-invalid{% endif %}" value="{{ form_values.oauth_client_id }}" required>
+                {% if form_errors.oauth_client_id %}
+                <div class="invalid-feedback">{{ form_errors.oauth_client_id }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label for="oauth_client_secret" class="form-label">
+                  <span class="field-label-with-help">
+                    OAuth client secret
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="OAuth client secret field info">i</span>
+                      <span class="field-help-tooltip">the client secret used by the ven client to retrieve an access token to authenticate to the VTN.</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="oauth_client_secret" name="oauth_client_secret" type="text" class="form-control{% if form_errors.oauth_client_secret %} is-invalid{% endif %}" value="{{ form_values.oauth_client_secret }}" required>
+                {% if form_errors.oauth_client_secret %}
+                <div class="invalid-feedback">{{ form_errors.oauth_client_secret }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12">
+                <label for="oauth_token_url" class="form-label">
+                  <span class="field-label-with-help">
+                    OAuth token URL
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="OAuth token URL field info">i</span>
+                      <span class="field-help-tooltip">The URL at which the VEN client can exchange it&#39;s oauth client_id and client_secret for an access token. MAY be the /oauth/token endpoint on the VTN, or a direct oauth2 token RL for the underlying authorization server (for example, MS entra or AWS cognito).</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="oauth_token_url" name="oauth_token_url" type="url" class="form-control{% if form_errors.oauth_token_url %} is-invalid{% endif %}" value="{{ form_values.oauth_token_url }}" placeholder="https://vtn.example.com/oauth/token" required>
+                {% if form_errors.oauth_token_url %}
+                <div class="invalid-feedback">{{ form_errors.oauth_token_url }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12">
+                <label for="scopes" class="form-label">
+                  <span class="field-label-with-help">
+                    Scopes (comma-separated)
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="Scopes field info">i</span>
+                      <span class="field-help-tooltip">The scopes the VEN client will request at the oauth_token_url. Defaults to empty, which will return the default scopes assigned by the authorization server (typically all scopes available to the oauth client). Can be used to retrieve focused tokens for a specific VEN client with only one (or more) scopes present in it.</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="scopes" name="scopes" type="text" class="form-control{% if form_errors.scopes %} is-invalid{% endif %}" value="{{ form_values.scopes }}" placeholder="read_targets read_ven_objects">
+                {% if form_errors.scopes %}
+                <div class="invalid-feedback">{{ form_errors.scopes }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12 d-flex justify-content-between">
+                <button
+                  type="submit"
+                  formaction="{{ url_for('.ven_client_delete', ven_id=ven_client.id) }}"
+                  class="btn btn-outline-danger"
+                  formnovalidate
+                  onclick="return confirm('Delete this VEN client?');"
+                >
+                  Delete VEN client
+                </button>
+                <button type="submit" class="btn btn-primary">Save changes</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

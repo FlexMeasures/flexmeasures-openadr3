@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+VEN_CLIENT_ATTRIBUTE_KEY = "ven_client"
+
+
+@dataclass(frozen=True, slots=True)
+class VenSensorConfigRecord:
+    """Serialized polling schedule stored in a VEN asset's JSON attributes."""
+
+    name: str
+    targets: tuple[str, ...] = ()
+    utc_trigger_time: str = ""
+    fetch_import_capacity_limits: bool = False
+    fetch_export_capacity_limits: bool = False
+    fetch_events_job_id: str | None = None
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, object]) -> VenSensorConfigRecord:
+        raw_targets = data.get("targets", [])
+        targets: tuple[str, ...]
+        if isinstance(raw_targets, list):
+            targets = tuple(str(item) for item in raw_targets)
+        else:
+            targets = ()
+
+        job_id = data.get("fetch_events_job_id")
+        return cls(
+            name=str(data.get("name", "")),
+            targets=targets,
+            utc_trigger_time=str(data.get("utc_trigger_time", "") or ""),
+            fetch_import_capacity_limits=bool(
+                data.get("fetch_import_capacity_limits", False)
+            ),
+            fetch_export_capacity_limits=bool(
+                data.get("fetch_export_capacity_limits", False)
+            ),
+            fetch_events_job_id=str(job_id) if job_id is not None else None,
+        )
+
+    def to_json(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "name": self.name,
+            "targets": list(self.targets),
+            "utc_trigger_time": self.utc_trigger_time,
+            "fetch_import_capacity_limits": self.fetch_import_capacity_limits,
+            "fetch_export_capacity_limits": self.fetch_export_capacity_limits,
+        }
+        if self.fetch_events_job_id is not None:
+            payload["fetch_events_job_id"] = self.fetch_events_job_id
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class VenClientAttributePayload:
+    """VEN connection settings and polling schedules stored on a generic asset."""
+
+    vtn_url: str = ""
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
+    oauth_token_url: str = ""
+    scopes: tuple[str, ...] = ()
+    sensor_configs: tuple[VenSensorConfigRecord, ...] = ()
+
+    @classmethod
+    def empty(cls) -> VenClientAttributePayload:
+        return cls()
+
+    @classmethod
+    def from_asset_attributes(
+        cls, attributes: Mapping[str, object] | None
+    ) -> VenClientAttributePayload:
+        if attributes is None:
+            return cls.empty()
+
+        raw_payload = attributes.get(VEN_CLIENT_ATTRIBUTE_KEY, {})
+        if not isinstance(raw_payload, Mapping):
+            return cls.empty()
+
+        raw_scopes = raw_payload.get("scopes", [])
+        scopes: tuple[str, ...]
+        if isinstance(raw_scopes, list):
+            scopes = tuple(str(item) for item in raw_scopes)
+        else:
+            scopes = ()
+
+        raw_configs = raw_payload.get("sensor_configs", [])
+        sensor_configs: tuple[VenSensorConfigRecord, ...] = ()
+        if isinstance(raw_configs, list):
+            sensor_configs = tuple(
+                VenSensorConfigRecord.from_json(item)
+                for item in raw_configs
+                if isinstance(item, Mapping)
+            )
+
+        return cls(
+            vtn_url=str(raw_payload.get("vtn_url", "") or ""),
+            oauth_client_id=str(raw_payload.get("oauth_client_id", "") or ""),
+            oauth_client_secret=str(raw_payload.get("oauth_client_secret", "") or ""),
+            oauth_token_url=str(raw_payload.get("oauth_token_url", "") or ""),
+            scopes=scopes,
+            sensor_configs=sensor_configs,
+        )
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "vtn_url": self.vtn_url,
+            "oauth_client_id": self.oauth_client_id,
+            "oauth_client_secret": self.oauth_client_secret,
+            "oauth_token_url": self.oauth_token_url,
+            "scopes": list(self.scopes),
+            "sensor_configs": [record.to_json() for record in self.sensor_configs],
+        }

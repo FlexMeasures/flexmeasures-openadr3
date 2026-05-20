@@ -1,0 +1,1 @@
+openadr3-client>=2.0.4

@@ -1,0 +1,47 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: check-added-large-files
+    -   id: check-json
+    -   id: check-symlinks
+    -   id: check-toml
+    -   id: check-xml
+    -   id: check-yaml
+    -   id: detect-private-key
+    -   id: end-of-file-fixer
+    -   id: fix-byte-order-marker
+    -   id: trailing-whitespace
+    -   id: mixed-line-ending
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.9
+    hooks:
+        - id: ruff
+        - id: ruff-format
+- repo: local
+  hooks:
+    - id: mypy
+      name: mypy
+      description: a hook the runs mypy with uv
+      entry: uv run mypy
+      language: system
+      types: [python]
+      stages: [pre-commit]
+- repo: local
+  hooks:
+    - id: ruff-check
+      name: ruff-check
+      description: a hook the runs ruff with uv
+      entry: uv run ruff check
+      language: system
+      types: [python]
+      stages: [pre-commit]
+- repo: local
+  hooks:
+    - id: ruff-check
+      name: ruff-check
+      description: a hook the runs ruff with uv
+      entry: uv run ruff format
+      language: system
+      types: [python]
+      stages: [pre-commit]
