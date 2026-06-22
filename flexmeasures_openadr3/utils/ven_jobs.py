@@ -59,7 +59,7 @@ class PayloadTypeSensorMapping:
         )
         return cls(import_sensor=import_sensor, export_sensor=export_sensor)
 
-    def sensor_for(self, payload_type: EventPayloadType) -> Sensor | None:
+    def get_sensor_for(self, payload_type: EventPayloadType) -> Sensor | None:
         if payload_type is EventPayloadType.IMPORT_CAPACITY_LIMIT:
             return self.import_sensor
         if payload_type is EventPayloadType.EXPORT_CAPACITY_LIMIT:
@@ -182,7 +182,7 @@ def _store_event_payloads(
         for interval in event.intervals or ():
             start, end = _get_interval_period(event, interval)
             for payload in interval.payloads:
-                sensor = sensor_mapping.sensor_for(payload.type)
+                sensor = sensor_mapping.get_sensor_for(payload.type)
                 if sensor is None:
                     continue
                 if len(payload.values) != 1:

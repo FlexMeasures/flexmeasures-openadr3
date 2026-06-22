@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import warnings
+from importlib_metadata import version as pkg_version
+from packaging.version import Version
+
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -16,11 +20,6 @@ The __init__ for the flexmeasures-oadr3 FlexMeasures plugin.
 
 FlexMeasures registers the BluePrint objects it finds in here.
 """
-
-
-import warnings  # NOQA: E402
-from importlib_metadata import version as pkg_version  # NOQA: E402
-from packaging.version import Version  # NOQA: E402
 
 try:
     _fm_version = pkg_version("flexmeasures")
