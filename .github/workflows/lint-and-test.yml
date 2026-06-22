@@ -8,11 +8,11 @@ jobs:
     runs-on: ubuntu-latest
     name: "Check (on Python3.11)"
     steps:
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@d09bd5e6005b175076f227b13d9730d56e9dcfcb
         with:
           python-version: 3.11
       - uses: actions/checkout@v3
-      - uses: pre-commit/action@v3.0.0
+      - uses: pre-commit/action@646c83fcd040023954eafda54b4db0192ce70507
 
   test:
     needs: check
@@ -21,9 +21,9 @@ jobs:
       fail-fast: false
     name: "Test (on Python 3.11)"
     steps:
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@d09bd5e6005b175076f227b13d9730d56e9dcfcb
         with:
           python-version: 3.11
       - name: Check out src from Git
-        uses: actions/checkout@v3
+        uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
       - run: make test

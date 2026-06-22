@@ -25,7 +25,7 @@ from flexmeasures_openadr3.utils.ven_clients import (
 
 OPENADR_EVENT_SOURCE_NAME = "OpenADR 3 VTN"
 OPENADR_EVENT_SOURCE_TYPE = "gateway"
-FETCH_EVENTS_QUEUE_NAME = "forecasting"  # "ingestion"
+FETCH_EVENTS_QUEUE_NAME = "ingestion"
 SUPPORTED_DR_PAYLOAD_TYPES = (
     EventPayloadType.IMPORT_CAPACITY_LIMIT,
     EventPayloadType.EXPORT_CAPACITY_LIMIT,
