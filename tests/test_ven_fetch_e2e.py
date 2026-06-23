@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-
-from openadr3_client.oadr310.models.event.event import ExistingEvent
-from openadr3_client.oadr310.models.event.event_payload import EventPayloadType
 import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import select
-
 from flexmeasures.data.models.time_series import TimedBelief
 from flexmeasures.data.services.data_sources import get_or_create_source
+from openadr3_client.oadr310.models.event.event import ExistingEvent
+from openadr3_client.oadr310.models.event.event_payload import EventPayloadType
+from sqlalchemy import select
 
 from flexmeasures_openadr3.utils.ven_clients import (
     VenClientFormData,
@@ -23,7 +21,6 @@ from flexmeasures_openadr3.utils.ven_jobs import (
     OPENADR_EVENT_SOURCE_TYPE,
     VenFetchJobScheduler,
 )
-
 from tests.test_container.integration_types import IntegrationTestVTNClient
 
 
@@ -58,19 +55,12 @@ def _beliefs_for_sensor(db: SQLAlchemy, sensor_id: int) -> list[TimedBelief]:
         source=OPENADR_EVENT_SOURCE_NAME,
         source_type=OPENADR_EVENT_SOURCE_TYPE,
     )
-    return list(
-        db.session.scalars(
-            select(TimedBelief)
-            .filter_by(sensor_id=sensor_id, source_id=source.id)
-            .order_by(TimedBelief.event_start)
-        ).all()
-    )
+    return list(db.session.scalars(select(TimedBelief).filter_by(sensor_id=sensor_id, source_id=source.id).order_by(TimedBelief.event_start)).all())
 
 
 def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     app: Flask,
     fresh_db: SQLAlchemy,
-    logged_in_prosumer: object,
     ven_client: IntegrationTestVTNClient,
     vtn_capacity_limit_event_seed: ExistingEvent,
     ven_client_repository: VenClientRepository,
@@ -122,18 +112,10 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     for i, belief in enumerate(import_beliefs):
         interval = seed.intervals[i] if seed.intervals is not None else None
         assert interval is not None and interval.interval_period is not None
-        assert (
-            interval.interval_period.start
-            <= belief.event_start
-            < interval.interval_period.start + interval.interval_period.duration
-        )
+        assert interval.interval_period.start <= belief.event_start < interval.interval_period.start + interval.interval_period.duration
 
         import_capacity_payload = next(
-            (
-                payload
-                for payload in interval.payloads
-                if payload.type == EventPayloadType.IMPORT_CAPACITY_LIMIT
-            ),
+            (payload for payload in interval.payloads if payload.type == EventPayloadType.IMPORT_CAPACITY_LIMIT),
             None,
         )
         assert import_capacity_payload is not None
@@ -142,18 +124,10 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     for i, belief in enumerate(export_beliefs):
         interval = seed.intervals[i] if seed.intervals is not None else None
         assert interval is not None and interval.interval_period is not None
-        assert (
-            interval.interval_period.start
-            <= belief.event_start
-            < interval.interval_period.start + interval.interval_period.duration
-        )
+        assert interval.interval_period.start <= belief.event_start < interval.interval_period.start + interval.interval_period.duration
 
         export_capacity_payload = next(
-            (
-                payload
-                for payload in interval.payloads
-                if payload.type == EventPayloadType.EXPORT_CAPACITY_LIMIT
-            ),
+            (payload for payload in interval.payloads if payload.type == EventPayloadType.EXPORT_CAPACITY_LIMIT),
             None,
         )
         assert export_capacity_payload is not None

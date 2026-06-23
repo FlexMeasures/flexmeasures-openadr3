@@ -14,16 +14,15 @@ import argparse
 import sys
 
 from flexmeasures.app import create as create_flexmeasures_app
+from settings import POLLING_SCHEDULE_NAME, VEN_CLIENT_NAME
+
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
 from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
 
-from settings import POLLING_SCHEDULE_NAME, VEN_CLIENT_NAME
-
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Trigger an immediate OpenADR event fetch for a polling schedule."
-    )
+    """Trigger an immediate OpenADR event fetch for a configured polling schedule."""
+    parser = argparse.ArgumentParser(description="Trigger an immediate OpenADR event fetch for a polling schedule.")
     parser.add_argument(
         "--ven-name",
         default=VEN_CLIENT_NAME,
@@ -55,9 +54,7 @@ def main() -> None:
             raise SystemExit(1)
 
         scheduler._execute(ven_client.id, config.name)
-        print(
-            f"Fetch complete for VEN '{args.ven_name}' schedule '{args.config_name}'."
-        )
+        print(f"Fetch complete for VEN '{args.ven_name}' schedule '{args.config_name}'.")
 
 
 if __name__ == "__main__":

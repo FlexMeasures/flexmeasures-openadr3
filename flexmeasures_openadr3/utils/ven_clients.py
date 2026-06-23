@@ -3,15 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from flask import current_app
+from flexmeasures.data import db
+from flexmeasures.data.models.generic_assets import GenericAsset
+from flexmeasures.data.models.time_series import Sensor
 from openadr3_client.oadr310._ven.client import VirtualEndNodeClient
 from openadr3_client.ven.http_factory import VirtualEndNodeHttpClientFactory
 from openadr3_client.version import OADRVersion
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_core.core_schema import ValidationInfo
-
-from flexmeasures.data import db
-from flexmeasures.data.models.generic_assets import GenericAsset
-from flexmeasures.data.models.time_series import Sensor
 
 from flexmeasures_openadr3.models.forms import (
     FormValidationErrors,
@@ -28,6 +27,11 @@ from flexmeasures_openadr3.models.storage import (
 from flexmeasures_openadr3.utils.encryption import SecretsEncryptor
 from flexmeasures_openadr3.utils.sensor import VenAssetRepository, VenSensorRepository
 
+_TIME_COMPONENT_COUNT = 3
+_MAX_HOUR = 23
+_MAX_MINUTE = 59
+_MAX_SECOND = 59
+
 
 def _parse_csv_values(raw_value: str) -> list[str]:
     """Parse a comma-separated string into a list of trimmed, non-empty values."""
@@ -41,7 +45,8 @@ def _parse_csv_values(raw_value: str) -> list[str]:
 
 @dataclass
 class VenSensorConfig:
-    """A polling schedule that defines when and what to fetch from a VTN.
+    """
+    A polling schedule that defines when and what to fetch from a VTN.
 
     Each config maps to zero, one, or two FlexMeasures sensors (import/export).
     """
@@ -56,6 +61,7 @@ class VenSensorConfig:
     export_sensor: Sensor | None = field(default=None, repr=False)
 
     def to_record(self) -> VenSensorConfigRecord:
+        """Serialize this config to a storable record."""
         return VenSensorConfigRecord(
             name=self.name,
             targets=tuple(self.targets),
@@ -67,6 +73,7 @@ class VenSensorConfig:
 
     @classmethod
     def from_record(cls, record: VenSensorConfigRecord) -> VenSensorConfig:
+        """Build a config from a stored record without linked sensors."""
         return cls(
             name=record.name,
             targets=list(record.targets),
@@ -79,7 +86,8 @@ class VenSensorConfig:
 
 @dataclass
 class VenClient:
-    """Domain model representing an OpenADR VEN client.
+    """
+    Domain model representing an OpenADR VEN client.
 
     Wraps a FlexMeasures GenericAsset and provides typed access to VEN-specific
     attributes stored in the asset's JSON attributes column.
@@ -95,27 +103,28 @@ class VenClient:
 
     @property
     def id(self) -> int:
+        """Return the underlying FlexMeasures asset id."""
         return int(self.asset.id)
 
     @property
     def name(self) -> str:
+        """Return the VEN client display name."""
         return str(self.asset.name)
 
     @name.setter
     def name(self, value: str) -> None:
+        """Update the VEN client display name."""
         self.asset.name = value
 
     def get_sensor_config(self, config_name: str) -> VenSensorConfig | None:
-        return next(
-            (cfg for cfg in self.sensor_configs if cfg.name == config_name), None
-        )
+        """Return a polling schedule by name, if it exists."""
+        return next((cfg for cfg in self.sensor_configs if cfg.name == config_name), None)
 
     def create_http_client(self) -> VirtualEndNodeClient:
+        """Build an authenticated OpenADR HTTP client for this VEN."""
         secrets_encryptor = SecretsEncryptor.from_current_app()
         decrypted_oauth_client_id = secrets_encryptor.decrypt(self.oauth_client_id)
-        decrypted_oauth_client_secret = secrets_encryptor.decrypt(
-            self.oauth_client_secret
-        )
+        decrypted_oauth_client_secret = secrets_encryptor.decrypt(self.oauth_client_secret)
 
         return VirtualEndNodeHttpClientFactory.create_http_ven_client(
             vtn_base_url=self.vtn_url,
@@ -123,14 +132,12 @@ class VenClient:
             client_secret=decrypted_oauth_client_secret,
             token_url=self.oauth_token_url,
             scopes=self.scopes,
-            allow_insecure_http=current_app.config.get(
-                "ALLOW_INSECURE_HTTP_VTN", "false"
-            )
-            == "true",
+            allow_insecure_http=current_app.config.get("ALLOW_INSECURE_HTTP_VTN", "false") == "true",
             version=OADRVersion.OADR_310,
         )  # type: ignore[return-value]
 
     def to_attribute_payload(self) -> VenClientAttributePayload:
+        """Convert this client to the JSON payload stored on the asset."""
         return VenClientAttributePayload(
             vtn_url=self.vtn_url,
             oauth_client_id=self.oauth_client_id,
@@ -154,9 +161,7 @@ class VenClientRepository:
         self._sensors = VenSensorRepository()
         self._secrets_encryptor = SecretsEncryptor.from_current_app()
 
-    def _build_sensor_configs(
-        self, asset: GenericAsset, records: tuple[VenSensorConfigRecord, ...]
-    ) -> list[VenSensorConfig]:
+    def _build_sensor_configs(self, asset: GenericAsset, records: tuple[VenSensorConfigRecord, ...]) -> list[VenSensorConfig]:
         configs: list[VenSensorConfig] = []
         for record in records:
             sensor_config = VenSensorConfig.from_record(record)
@@ -179,10 +184,9 @@ class VenClientRepository:
             sensor_configs=self._build_sensor_configs(asset, payload.sensor_configs),
         )
 
-    def _persist_payload(
-        self, ven_client: VenClient, *, encrypt_oauth_credentials: bool = False
-    ) -> None:
-        """Write VEN-specific data back to the asset's attributes column.
+    def _persist_payload(self, ven_client: VenClient, *, encrypt_oauth_credentials: bool = False) -> None:
+        """
+        Write VEN-specific data back to the asset's attributes column.
 
         OAuth client id and secret are stored encrypted. Pass *encrypt_oauth_credentials*
         True when *ven_client* carries plaintext from a form; pass False when those
@@ -191,12 +195,8 @@ class VenClientRepository:
         """
         attributes = dict(ven_client.asset.attributes or {})
         if encrypt_oauth_credentials:
-            stored_oauth_client_id = self._secrets_encryptor.encrypt(
-                ven_client.oauth_client_id
-            )
-            stored_oauth_client_secret = self._secrets_encryptor.encrypt(
-                ven_client.oauth_client_secret
-            )
+            stored_oauth_client_id = self._secrets_encryptor.encrypt(ven_client.oauth_client_id)
+            stored_oauth_client_secret = self._secrets_encryptor.encrypt(ven_client.oauth_client_secret)
         else:
             stored_oauth_client_id = ven_client.oauth_client_id
             stored_oauth_client_secret = ven_client.oauth_client_secret
@@ -213,17 +213,21 @@ class VenClientRepository:
         ven_client.asset.attributes = attributes
 
     def list_ven_clients(self) -> list[VenClient]:
+        """Return all persisted VEN clients."""
         return [self._build_ven_client(asset) for asset in self._assets.list_all()]
 
     def find_by_id(self, ven_id: int) -> VenClient | None:
+        """Find a VEN client by asset id."""
         asset = self._assets.find_by_id(ven_id)
         return self._build_ven_client(asset) if asset else None
 
     def find_by_name(self, ven_name: str) -> VenClient | None:
+        """Find a VEN client by asset name."""
         asset = self._assets.find_by_name(ven_name)
         return self._build_ven_client(asset) if asset else None
 
     def create(self, form_data: VenClientFormData) -> VenClient:
+        """Create a new VEN client from validated form data."""
         asset = self._assets.create_asset(form_data.name)
         ven_client = VenClient(
             asset=asset,
@@ -238,6 +242,7 @@ class VenClientRepository:
         return self._build_ven_client(asset)
 
     def update(self, ven_client: VenClient, form_data: VenClientFormData) -> VenClient:
+        """Update an existing VEN client from validated form data."""
         ven_client.name = form_data.name
         ven_client.vtn_url = form_data.vtn_url
         ven_client.oauth_client_id = form_data.oauth_client_id
@@ -249,16 +254,14 @@ class VenClientRepository:
         return ven_client
 
     def delete(self, ven_client: VenClient) -> None:
+        """Delete a VEN client and its underlying asset."""
         db.session.delete(ven_client.asset)
 
-    def append_sensor_config(
-        self, ven_client: VenClient, form_data: VenSensorConfigFormData
-    ) -> VenSensorConfig:
+    def append_sensor_config(self, ven_client: VenClient, form_data: VenSensorConfigFormData) -> VenSensorConfig:
         """Append a new sensor config and ensure its sensors exist."""
         if ven_client.get_sensor_config(form_data.name) is not None:
-            raise ValueError(
-                f"Sensor config with name '{form_data.name}' already exists."
-            )
+            msg = f"Sensor config with name '{form_data.name}' already exists."
+            raise ValueError(msg)
 
         sensor_config = VenSensorConfig(
             name=form_data.name,
@@ -268,9 +271,7 @@ class VenClientRepository:
             fetch_export_capacity_limits=form_data.fetch_export_capacity_limits,
         )
 
-        sensors = self._sensors.ensure_sensors_for_config(
-            ven_client.asset, sensor_config
-        )
+        sensors = self._sensors.ensure_sensors_for_config(ven_client.asset, sensor_config)
         sensor_config.import_sensor = sensors.import_sensor
         sensor_config.export_sensor = sensors.export_sensor
 
@@ -288,21 +289,16 @@ class VenClientRepository:
         """Update an existing sensor config and ensure its sensors exist."""
         sensor_config = ven_client.get_sensor_config(config_name)
         if sensor_config is None:
-            raise ValueError(f"Sensor config with name '{config_name}' not found.")
+            msg = f"Sensor config with name '{config_name}' not found."
+            raise ValueError(msg)
 
         sensor_config.name = form_data.name
         sensor_config.targets = list(form_data.targets)
         sensor_config.utc_trigger_time = form_data.utc_trigger_time
-        sensor_config.fetch_import_capacity_limits = (
-            form_data.fetch_import_capacity_limits
-        )
-        sensor_config.fetch_export_capacity_limits = (
-            form_data.fetch_export_capacity_limits
-        )
+        sensor_config.fetch_import_capacity_limits = form_data.fetch_import_capacity_limits
+        sensor_config.fetch_export_capacity_limits = form_data.fetch_export_capacity_limits
 
-        sensors = self._sensors.ensure_sensors_for_config(
-            ven_client.asset, sensor_config
-        )
+        sensors = self._sensors.ensure_sensors_for_config(ven_client.asset, sensor_config)
         sensor_config.import_sensor = sensors.import_sensor
         sensor_config.export_sensor = sensors.export_sensor
 
@@ -314,18 +310,15 @@ class VenClientRepository:
         """Remove a sensor config and delete its associated sensors."""
         sensor_config = ven_client.get_sensor_config(config_name)
         if sensor_config is None:
-            raise ValueError(f"Sensor config with name '{config_name}' not found.")
+            msg = f"Sensor config with name '{config_name}' not found."
+            raise ValueError(msg)
 
         self._sensors.delete_sensors_for_config(ven_client.asset, config_name)
-        ven_client.sensor_configs = [
-            cfg for cfg in ven_client.sensor_configs if cfg.name != config_name
-        ]
+        ven_client.sensor_configs = [cfg for cfg in ven_client.sensor_configs if cfg.name != config_name]
         self._persist_payload(ven_client)
         db.session.flush()
 
-    def persist_job_id(
-        self, ven_client: VenClient, config_name: str, job_id: str | None
-    ) -> None:
+    def persist_job_id(self, ven_client: VenClient, config_name: str, job_id: str | None) -> None:
         """Store a job ID on a specific sensor config."""
         sensor_config = ven_client.get_sensor_config(config_name)
         if sensor_config is None:
@@ -363,9 +356,7 @@ class VenClientFormData(BaseModel):
 
     @field_validator("scopes", mode="before")
     @classmethod
-    def _parse_csv_string_fields(
-        cls, value: str | list[str] | tuple[str, ...] | None
-    ) -> list[str]:
+    def _parse_csv_string_fields(cls, value: str | list[str] | tuple[str, ...] | None) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):
@@ -376,6 +367,7 @@ class VenClientFormData(BaseModel):
 
     @classmethod
     def from_form_values(cls, field_values: VenClientFormValues) -> VenClientFormData:
+        """Build validated data from raw VEN client form values."""
         return cls.model_validate(field_values.to_validation_input())
 
 
@@ -390,9 +382,7 @@ class VenSensorConfigFormData(BaseModel):
 
     @field_validator("targets", mode="before")
     @classmethod
-    def _parse_targets_csv(
-        cls, value: str | list[str] | tuple[str, ...] | None
-    ) -> list[str]:
+    def _parse_targets_csv(cls, value: str | list[str] | tuple[str, ...] | None) -> list[str]:
         if value is None:
             return []
         if isinstance(value, str):
@@ -403,20 +393,21 @@ class VenSensorConfigFormData(BaseModel):
 
     @field_validator("utc_trigger_time")
     @classmethod
-    def _validate_utc_trigger_time(cls, value: str, info: ValidationInfo) -> str:
+    def _validate_utc_trigger_time(cls, value: str, _info: ValidationInfo) -> str:
         parsed_value = value.strip()
         time_parts = parsed_value.split(":")
-        if len(time_parts) != 3 or not all(part.isdigit() for part in time_parts):
-            raise ValueError("Must be in UTC format HH:MM:SS.")
+        if len(time_parts) != _TIME_COMPONENT_COUNT or not all(part.isdigit() for part in time_parts):
+            msg = "Must be in UTC format HH:MM:SS."
+            raise ValueError(msg)
         hour, minute, second = (int(part) for part in time_parts)
-        if hour > 23 or minute > 59 or second > 59:
-            raise ValueError("Must be in UTC format HH:MM:SS.")
+        if hour > _MAX_HOUR or minute > _MAX_MINUTE or second > _MAX_SECOND:
+            msg = "Must be in UTC format HH:MM:SS."
+            raise ValueError(msg)
         return f"{hour:02d}:{minute:02d}:{second:02d}"
 
     @classmethod
-    def from_post_values(
-        cls, post_values: VenSensorConfigPostValues
-    ) -> VenSensorConfigFormData:
+    def from_post_values(cls, post_values: VenSensorConfigPostValues) -> VenSensorConfigFormData:
+        """Build validated data from parsed polling schedule POST values."""
         return cls.model_validate(post_values.to_validation_input())
 
 
@@ -472,12 +463,8 @@ def build_ven_sensor_config_form_values(
         name=source.name,
         targets=", ".join(source.targets),
         utc_trigger_time=source.utc_trigger_time,
-        fetch_import_capacity_limits=(
-            "on" if source.fetch_import_capacity_limits else ""
-        ),
-        fetch_export_capacity_limits=(
-            "on" if source.fetch_export_capacity_limits else ""
-        ),
+        fetch_import_capacity_limits=("on" if source.fetch_import_capacity_limits else ""),
+        fetch_export_capacity_limits=("on" if source.fetch_export_capacity_limits else ""),
     )
 
 
@@ -497,14 +484,14 @@ def validate_ven_client_form(
             field_name = str(issue["loc"][-1])
             errors.add(field_name, issue["msg"])
     else:
-        assert ven_client_data is not None
+        if ven_client_data is None:
+            msg = "Validated VEN client form data missing despite successful validation."
+            raise RuntimeError(msg)
         existing = ven_client_repository.find_by_name(ven_client_data.name)
         if existing and ven_client_data.name != current_name:
             errors.add("name", "A VEN client with this name already exists.")
 
-    return FormValidationResult(
-        data=ven_client_data if not errors else None, errors=errors
-    )
+    return FormValidationResult(data=ven_client_data if not errors else None, errors=errors)
 
 
 def validate_ven_sensor_config_form(
@@ -523,16 +510,10 @@ def validate_ven_sensor_config_form(
             field_name = str(issue["loc"][-1])
             errors.add(field_name, issue["msg"])
     else:
-        assert config is not None
-        if not (
-            config.fetch_import_capacity_limits or config.fetch_export_capacity_limits
-        ):
-            errors.add(
-                "limits", "Select at least one limit type (import and/or export)."
-            )
+        if not (config.fetch_import_capacity_limits or config.fetch_export_capacity_limits):
+            errors.add("limits", "Select at least one limit type (import and/or export).")
 
-        if existing_configs is not None and config.name != current_name:
-            if any(cfg.name == config.name for cfg in existing_configs):
-                errors.add("name", "A sensor config with this name already exists.")
+        if existing_configs is not None and config.name != current_name and any(cfg.name == config.name for cfg in existing_configs):
+            errors.add("name", "A sensor config with this name already exists.")
 
     return FormValidationResult(data=config if not errors else None, errors=errors)

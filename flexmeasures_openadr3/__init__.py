@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import warnings
-from importlib_metadata import version as pkg_version
-from packaging.version import Version
-
 from dataclasses import dataclass
 from typing import TypedDict
 
 from flask import Blueprint
 from flask.blueprints import BlueprintSetupState
+from importlib_metadata import PackageNotFoundError
+from importlib_metadata import version as pkg_version
+from packaging.version import Version
 
 from .utils.blueprints import ensure_bp_routes_are_loaded_fresh
 
@@ -24,15 +24,14 @@ FlexMeasures registers the BluePrint objects it finds in here.
 try:
     _fm_version = pkg_version("flexmeasures")
     if Version(_fm_version) < Version("v0.32.0"):
-        warnings.warn(
-            f"flexmeasures-openadr3 requires FlexMeasures >= v0.32.0, "
-            f"but version {_fm_version} is installed."
-        )
-except Exception:
+        warnings.warn(f"flexmeasures-openadr3 requires FlexMeasures >= v0.32.0, but version {_fm_version} is installed.", stacklevel=2)
+except PackageNotFoundError:
     pass
 
 
 class PluginSettingSpec(TypedDict):
+    """FlexMeasures plugin setting metadata exposed to administrators."""
+
     description: str
     level: str
     required: bool
@@ -67,6 +66,8 @@ from flexmeasures_openadr3.ui.views import dashboard  # noqa: E402,F401
 
 @dataclass(frozen=True, slots=True)
 class MenuRegistration:
+    """Sidebar menu entry registered with FlexMeasures."""
+
     view_key: str
     title: str
     icon: str
@@ -81,11 +82,10 @@ OPENADR_MENU_REGISTRATION = MenuRegistration(
 
 @flexmeasures_openadr3_ui_bp.record_once
 def register_menu_item(setup_state: BlueprintSetupState) -> None:
+    """Register the OpenADR 3 dashboard in the FlexMeasures sidebar menu."""
     app = setup_state.app
     registration = OPENADR_MENU_REGISTRATION
-    app.config["FLEXMEASURES_MENU_LISTED_VIEWS"] = app.config.get(
-        "FLEXMEASURES_MENU_LISTED_VIEWS", []
-    ) + [registration.view_key]
+    app.config["FLEXMEASURES_MENU_LISTED_VIEWS"] = [*app.config.get("FLEXMEASURES_MENU_LISTED_VIEWS", []), registration.view_key]
     app.config["FLEXMEASURES_MENU_LISTED_VIEW_TITLES"] = {
         **app.config.get("FLEXMEASURES_MENU_LISTED_VIEW_TITLES", {}),
         registration.view_key: registration.title,

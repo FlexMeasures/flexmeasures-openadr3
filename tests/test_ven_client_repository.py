@@ -25,7 +25,6 @@ from flexmeasures_openadr3.utils.ven_clients import (
 
 def test_create_ven_client_persists_connection_attributes(
     fresh_db: SQLAlchemy,
-    logged_in_prosumer: object,
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:
@@ -47,7 +46,6 @@ def test_create_ven_client_persists_connection_attributes(
 
 def test_create_ven_client_encrypts_oauth_credentials_in_attributes(
     fresh_db: SQLAlchemy,
-    logged_in_prosumer: object,
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:
@@ -60,14 +58,8 @@ def test_create_ven_client_encrypts_oauth_credentials_in_attributes(
     assert raw["oauth_client_secret"] != sample_ven_client_form_data.oauth_client_secret
 
     encryptor = SecretsEncryptor.from_current_app()
-    assert (
-        encryptor.decrypt(raw["oauth_client_id"])
-        == sample_ven_client_form_data.oauth_client_id
-    )
-    assert (
-        encryptor.decrypt(raw["oauth_client_secret"])
-        == sample_ven_client_form_data.oauth_client_secret
-    )
+    assert encryptor.decrypt(raw["oauth_client_id"]) == sample_ven_client_form_data.oauth_client_id
+    assert encryptor.decrypt(raw["oauth_client_secret"]) == sample_ven_client_form_data.oauth_client_secret
 
 
 def test_append_sensor_config_persists_polling_schedule(
@@ -83,14 +75,8 @@ def test_append_sensor_config_persists_polling_schedule(
     assert config is not None
     assert config.targets == sample_sensor_config_form_data.targets
     assert config.utc_trigger_time == sample_sensor_config_form_data.utc_trigger_time
-    assert (
-        config.fetch_import_capacity_limits
-        == sample_sensor_config_form_data.fetch_import_capacity_limits
-    )
-    assert (
-        config.fetch_export_capacity_limits
-        == sample_sensor_config_form_data.fetch_export_capacity_limits
-    )
+    assert config.fetch_import_capacity_limits == sample_sensor_config_form_data.fetch_import_capacity_limits
+    assert config.fetch_export_capacity_limits == sample_sensor_config_form_data.fetch_export_capacity_limits
 
     payload = VenClientAttributePayload.from_asset_attributes(reloaded.asset.attributes)
     assert len(payload.sensor_configs) == 1
@@ -171,8 +157,6 @@ def test_delete_sensor_config_removes_schedule_from_attributes(
 
 
 def test_duplicate_ven_client_name_raises(
-    created_ven_client: VenClient,
-    logged_in_prosumer: object,
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:

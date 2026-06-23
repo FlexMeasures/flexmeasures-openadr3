@@ -2,23 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING, Generic, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
-from flask_login import current_user
-from sqlalchemy import select, delete
 import sqlalchemy as sa
-
+from flask_login import current_user
 from flexmeasures.data import db
+from flexmeasures.data.models.audit_log import AssetAuditLog
 from flexmeasures.data.models.generic_assets import GenericAsset, GenericAssetType
 from flexmeasures.data.models.time_series import Sensor, TimedBelief
-from flexmeasures.data.models.audit_log import AssetAuditLog
 from flexmeasures.utils.time_utils import get_timezone
+from sqlalchemy import delete, select
 
 if TYPE_CHECKING:
     from flexmeasures_openadr3.utils.ven_clients import VenSensorConfig
 
-JsonScalar: TypeAlias = int | str | None
-JsonValue: TypeAlias = JsonScalar | dict[str, "JsonValue"] | list["JsonValue"]
+type JsonScalar = int | str | None
+type JsonValue = JsonScalar | dict[str, "JsonValue"] | list["JsonValue"]
 PrunedValueT = TypeVar("PrunedValueT", bound=JsonValue | None)
 
 
@@ -28,6 +27,7 @@ class RemoveMarker:
     __slots__ = ()
 
     def __repr__(self) -> str:
+        """Return a stable debug representation."""
         return "REMOVE"
 
 
@@ -35,12 +35,15 @@ REMOVE = RemoveMarker()
 
 
 @dataclass(frozen=True, slots=True)
-class PruneResult(Generic[PrunedValueT]):
+class PruneResult[PrunedValueT: JsonValue | None]:
+    """Result of pruning sensor references from a JSON subtree."""
+
     value: PrunedValueT | RemoveMarker
     changed: bool
 
     @property
     def should_remove(self) -> bool:
+        """Return whether the pruned value should be removed from its parent."""
         return self.value is REMOVE
 
 
@@ -53,10 +56,9 @@ VEN_SENSOR_UNIT = "kW"
 VEN_SENSOR_EVENT_RESOLUTION = timedelta(minutes=15)
 
 
-def _prune_flex_config_sensor_refs(
-    value: JsonValue, sensor_id: int
-) -> PruneResult[JsonValue]:
-    """Recursively remove sensor references from nested flex_model/flex_context JSON structures.
+def _prune_flex_config_sensor_refs(value: JsonValue, sensor_id: int) -> PruneResult[JsonValue]:  # noqa: C901
+    """
+    Recursively remove sensor references from nested flex_model/flex_context JSON structures.
 
     This function handles deeply nested JSON objects and lists from flex_model and flex_context
     JSONB columns. It scans for sensor references in two forms:
@@ -82,6 +84,7 @@ def _prune_flex_config_sensor_refs(
         {'limit': '10 kW'}
         >>> did_change
         True
+
     """
     if isinstance(value, dict):
         if set(value.keys()) == {"sensor"} and value.get("sensor") == sensor_id:
@@ -103,7 +106,7 @@ def _prune_flex_config_sensor_refs(
                 changed = True
                 continue
             if nested_result.value is not REMOVE:
-                pruned_dict[key] = cast(JsonValue, nested_result.value)
+                pruned_dict[key] = cast("JsonValue", nested_result.value)
         return PruneResult(value=pruned_dict, changed=changed)
 
     if isinstance(value, list):
@@ -116,16 +119,15 @@ def _prune_flex_config_sensor_refs(
                 changed = True
                 continue
             if item_result.value is not REMOVE:
-                pruned_list.append(cast(JsonValue, item_result.value))
+                pruned_list.append(cast("JsonValue", item_result.value))
         return PruneResult(value=pruned_list, changed=changed)
 
     return PruneResult(value=value, changed=False)
 
 
-def _prune_sensors_to_show_refs(
-    value: list[JsonValue] | None, sensor_id: int
-) -> PruneResult[list[JsonValue] | None]:
-    """Remove sensor references from sensors_to_show JSON list.
+def _prune_sensors_to_show_refs(value: list[JsonValue] | None, sensor_id: int) -> PruneResult[list[JsonValue] | None]:  # noqa: C901
+    """
+    Remove sensor references from sensors_to_show JSON list.
 
     This function handles sensors_to_show lists which support multiple entry formats:
     - Bare sensor IDs: [42, 43, ...]
@@ -149,6 +151,7 @@ def _prune_sensors_to_show_refs(
         [[43]]
         >>> did_change
         True
+
     """
     if not isinstance(value, list):
         return PruneResult(value=value, changed=False)
@@ -180,7 +183,7 @@ def _prune_sensors_to_show_refs(
             if entry_result.should_remove:
                 continue
             if entry_result.value is not REMOVE:
-                cleaned.append(cast(JsonValue, entry_result.value))
+                cleaned.append(cast("JsonValue", entry_result.value))
             continue
 
         cleaned.append(entry)
@@ -188,10 +191,9 @@ def _prune_sensors_to_show_refs(
     return PruneResult(value=cleaned, changed=changed)
 
 
-def _prune_sensors_to_show_entry(
-    entry: dict[str, JsonValue], sensor_id: int
-) -> PruneResult[dict[str, JsonValue]]:
-    """Remove sensor references from a single sensors_to_show dict entry.
+def _prune_sensors_to_show_entry(entry: dict[str, JsonValue], sensor_id: int) -> PruneResult[dict[str, JsonValue]]:  # noqa: C901
+    """
+    Remove sensor references from a single sensors_to_show dict entry.
 
     Handles three field types within a dict entry:
     - "sensor": Direct sensor ID reference → remove if matches
@@ -214,6 +216,7 @@ def _prune_sensors_to_show_entry(
         >>> pruned, did_change = _prune_sensors_to_show_entry(entry, sensor_id=42)
         >>> pruned is _REMOVE
         True
+
     """
     if "sensor" in entry:
         if entry.get("sensor") == sensor_id:
@@ -261,10 +264,9 @@ def _prune_sensors_to_show_entry(
     return PruneResult(value=entry, changed=False)
 
 
-def _prune_sensors_to_show_as_kpis_refs(
-    value: list[JsonValue] | None, sensor_id: int
-) -> PruneResult[list[JsonValue] | None]:
-    """Remove sensor references from sensors_to_show_as_kpis JSON list.
+def _prune_sensors_to_show_as_kpis_refs(value: list[JsonValue] | None, sensor_id: int) -> PruneResult[list[JsonValue] | None]:
+    """
+    Remove sensor references from sensors_to_show_as_kpis JSON list.
 
     This function handles sensors_to_show_as_kpis lists which support:
     - Bare sensor IDs: [42, 43, ...]
@@ -287,6 +289,7 @@ def _prune_sensors_to_show_as_kpis_refs(
         []
         >>> did_change
         True
+
     """
     if not isinstance(value, list):
         return PruneResult(value=value, changed=False)
@@ -307,6 +310,8 @@ def _prune_sensors_to_show_as_kpis_refs(
 
 @dataclass(frozen=True, slots=True)
 class VenSensorPair:
+    """Import and export sensors linked to a polling schedule."""
+
     import_sensor: Sensor | None
     export_sensor: Sensor | None
 
@@ -315,9 +320,8 @@ class VenAssetRepository:
     """Handles persistence of VEN GenericAsset and GenericAssetType objects."""
 
     def get_or_create_asset_type(self) -> GenericAssetType:
-        asset_type = db.session.execute(
-            select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)
-        ).scalar_one_or_none()
+        """Return the OpenADR VEN asset type, creating it if needed."""
+        asset_type = db.session.execute(select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)).scalar_one_or_none()
 
         if asset_type is None:
             asset_type = GenericAssetType(
@@ -330,6 +334,7 @@ class VenAssetRepository:
         return asset_type
 
     def create_asset(self, asset_name: str) -> GenericAsset:
+        """Create a new VEN generic asset for the current user."""
         asset_type = self.get_or_create_asset_type()
         existing = db.session.execute(
             select(GenericAsset).filter_by(
@@ -339,7 +344,8 @@ class VenAssetRepository:
         ).scalar_one_or_none()
 
         if existing is not None:
-            raise ValueError(f"Asset with name '{asset_name}' already exists.")
+            msg = f"Asset with name '{asset_name}' already exists."
+            raise ValueError(msg)
 
         asset = GenericAsset(
             name=asset_name,
@@ -351,22 +357,17 @@ class VenAssetRepository:
         return asset
 
     def find_by_id(self, asset_id: int) -> GenericAsset | None:
-        return db.session.execute(
-            select(GenericAsset).filter_by(id=asset_id)
-        ).scalar_one_or_none()
+        """Find a VEN asset by database id."""
+        return db.session.execute(select(GenericAsset).filter_by(id=asset_id)).scalar_one_or_none()
 
     def find_by_name(self, asset_name: str) -> GenericAsset | None:
-        return db.session.execute(
-            select(GenericAsset).filter_by(name=asset_name)
-        ).scalar_one_or_none()
+        """Find a VEN asset by name."""
+        return db.session.execute(select(GenericAsset).filter_by(name=asset_name)).scalar_one_or_none()
 
     def list_all(self) -> list[GenericAsset]:
+        """List all generic assets of the OpenADR VEN type."""
         asset_type = self.get_or_create_asset_type()
-        return list(
-            db.session.execute(
-                select(GenericAsset).filter_by(generic_asset_type_id=asset_type.id)
-            ).scalars()
-        )
+        return list(db.session.execute(select(GenericAsset).filter_by(generic_asset_type_id=asset_type.id)).scalars())
 
 
 class VenSensorRepository:
@@ -377,11 +378,11 @@ class VenSensorRepository:
         sensor_id: int,
         sensor_name: str | None = None,
     ) -> int:
-        """Remove references to a sensor in JSONB config fields across assets.
+        """
+        Remove references to a sensor in JSONB config fields across assets.
 
         Returns the number of updated assets.
         """
-
         vars_json = sa.func.jsonb_build_object("sid", sensor_id)
         candidates = db.session.scalars(
             sa.select(GenericAsset).where(
@@ -427,18 +428,10 @@ class VenSensorRepository:
 
         changed_assets = 0
         for asset in candidates:
-            flex_model_result = _prune_flex_config_sensor_refs(
-                asset.flex_model, sensor_id
-            )
-            flex_context_result = _prune_flex_config_sensor_refs(
-                asset.flex_context, sensor_id
-            )
-            sensors_to_show_result = _prune_sensors_to_show_refs(
-                asset.sensors_to_show, sensor_id
-            )
-            sensors_to_show_as_kpis_result = _prune_sensors_to_show_as_kpis_refs(
-                asset.sensors_to_show_as_kpis, sensor_id
-            )
+            flex_model_result = _prune_flex_config_sensor_refs(asset.flex_model, sensor_id)
+            flex_context_result = _prune_flex_config_sensor_refs(asset.flex_context, sensor_id)
+            sensors_to_show_result = _prune_sensors_to_show_refs(asset.sensors_to_show, sensor_id)
+            sensors_to_show_as_kpis_result = _prune_sensors_to_show_as_kpis_refs(asset.sensors_to_show_as_kpis, sensor_id)
 
             changed = any(
                 (
@@ -460,9 +453,7 @@ class VenSensorRepository:
             for field_changed, field_name in changed_field_events:
                 if not field_changed:
                     continue
-                sensor_label = (
-                    f"'{sensor_name}': {sensor_id}" if sensor_name else str(sensor_id)
-                )
+                sensor_label = f"'{sensor_name}': {sensor_id}" if sensor_name else str(sensor_id)
                 AssetAuditLog.add_record(
                     asset,
                     f"Removed sensor reference {sensor_label} from {field_name} (because sensor has been deleted).",
@@ -482,7 +473,8 @@ class VenSensorRepository:
         return changed_assets
 
     def _delete_sensor(self, sensor: Sensor) -> None:
-        """Delete a sensor and all its time series data.
+        """
+        Delete a sensor and all its time series data.
 
         Does not commit the session.
         Cleans up sensor references in asset JSONB fields.
@@ -491,12 +483,11 @@ class VenSensorRepository:
         sensor_name = sensor.name
         self._cleanup_sensor_references_in_assets(sensor.id, sensor.name)
         db.session.execute(delete(TimedBelief).filter_by(sensor_id=sensor.id))
-        AssetAuditLog.add_record(
-            sensor.generic_asset, f"Deleted sensor '{sensor_name}': {sensor.id}"
-        )
+        AssetAuditLog.add_record(sensor.generic_asset, f"Deleted sensor '{sensor_name}': {sensor.id}")
         db.session.execute(delete(Sensor).filter_by(id=sensor.id))
 
     def find_sensor(self, sensor_name: str, asset: GenericAsset) -> Sensor | None:
+        """Find a sensor by name on the given VEN asset."""
         return db.session.execute(
             select(Sensor).filter_by(
                 name=sensor_name,
@@ -505,6 +496,7 @@ class VenSensorRepository:
         ).scalar_one_or_none()
 
     def get_or_create_sensor(self, sensor_name: str, asset: GenericAsset) -> Sensor:
+        """Return an existing sensor or create one with default VEN settings."""
         sensor = self.find_sensor(sensor_name, asset)
 
         if sensor is None:
@@ -522,44 +514,34 @@ class VenSensorRepository:
         return sensor
 
     def import_sensor_name(self, config_name: str) -> str:
+        """Return the FlexMeasures sensor name for import capacity limits."""
         return f"{IMPORT_CAPACITY_LIMIT_SENSOR_NAME}-{config_name}"
 
     def export_sensor_name(self, config_name: str) -> str:
+        """Return the FlexMeasures sensor name for export capacity limits."""
         return f"{EXPORT_CAPACITY_LIMIT_SENSOR_NAME}-{config_name}"
 
-    def resolve_sensors_for_config(
-        self, asset: GenericAsset, sensor_config: VenSensorConfig
-    ) -> VenSensorPair:
+    def resolve_sensors_for_config(self, asset: GenericAsset, sensor_config: VenSensorConfig) -> VenSensorPair:
         """Find existing sensors for a config without creating them."""
         import_sensor = None
         export_sensor = None
 
         if sensor_config.fetch_import_capacity_limits:
-            import_sensor = self.find_sensor(
-                self.import_sensor_name(sensor_config.name), asset
-            )
+            import_sensor = self.find_sensor(self.import_sensor_name(sensor_config.name), asset)
         if sensor_config.fetch_export_capacity_limits:
-            export_sensor = self.find_sensor(
-                self.export_sensor_name(sensor_config.name), asset
-            )
+            export_sensor = self.find_sensor(self.export_sensor_name(sensor_config.name), asset)
 
         return VenSensorPair(import_sensor=import_sensor, export_sensor=export_sensor)
 
-    def ensure_sensors_for_config(
-        self, asset: GenericAsset, sensor_config: VenSensorConfig
-    ) -> VenSensorPair:
+    def ensure_sensors_for_config(self, asset: GenericAsset, sensor_config: VenSensorConfig) -> VenSensorPair:
         """Get or create the sensors required by a config."""
         import_sensor = None
         export_sensor = None
 
         if sensor_config.fetch_import_capacity_limits:
-            import_sensor = self.get_or_create_sensor(
-                self.import_sensor_name(sensor_config.name), asset
-            )
+            import_sensor = self.get_or_create_sensor(self.import_sensor_name(sensor_config.name), asset)
         if sensor_config.fetch_export_capacity_limits:
-            export_sensor = self.get_or_create_sensor(
-                self.export_sensor_name(sensor_config.name), asset
-            )
+            export_sensor = self.get_or_create_sensor(self.export_sensor_name(sensor_config.name), asset)
 
         return VenSensorPair(import_sensor=import_sensor, export_sensor=export_sensor)
 

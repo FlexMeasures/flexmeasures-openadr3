@@ -1,10 +1,11 @@
-import sys
 import importlib
+import sys
 
 
 def ensure_bp_routes_are_loaded_fresh(module_name: str) -> None:
     """
     Reload a module if it has been loaded before.
+
     It's useful for situations in which some other process has read
     the module before, but you need some action to happen which only
     happens during module import ― decorators are a good example.

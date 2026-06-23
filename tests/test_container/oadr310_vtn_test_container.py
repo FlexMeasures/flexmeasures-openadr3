@@ -4,10 +4,10 @@
 
 import re
 import threading
+import uuid
 from collections import deque
 from types import TracebackType
 from typing import Any, Self
-import uuid
 
 import docker.errors
 from testcontainers.core.container import DockerContainer, LogMessageWaitStrategy
@@ -84,9 +84,7 @@ class OpenLeadrVtnTestContainer:
             )
             .with_network(self._network)
             .with_network_aliases(self._postgres_alias)
-            .waiting_for(
-                LogMessageWaitStrategy("database system is ready to accept connections")
-            )
+            .waiting_for(LogMessageWaitStrategy("database system is ready to accept connections"))
         )
 
         # Initialize VTN container with the static environment variables.
@@ -107,11 +105,7 @@ class OpenLeadrVtnTestContainer:
             .with_env(key="PG_TZ", value="Europe/Amsterdam")
             .with_env(key="RUST_BACKTRACE", value="full")
             .with_env(key="RUST_LOG", value="trace")
-            .waiting_for(
-                LogMessageWaitStrategy(
-                    re.compile(r".*ListStore\.__init__\(\).*"), re.DOTALL
-                )
-            )
+            .waiting_for(LogMessageWaitStrategy(re.compile(r".*ListStore\.__init__\(\).*"), re.DOTALL))
         )
 
     def _start_vtn_log_capture(self) -> None:
@@ -123,16 +117,10 @@ class OpenLeadrVtnTestContainer:
 
         def _run() -> None:
             try:
-                for chunk in wrapped.logs(
-                    stream=True, follow=True, stdout=True, stderr=True
-                ):
+                for chunk in wrapped.logs(stream=True, follow=True, stdout=True, stderr=True):
                     if self._log_stop_event.is_set():
                         break
-                    chunk_bytes = (
-                        chunk
-                        if isinstance(chunk, bytes | bytearray)
-                        else str(chunk).encode("utf-8", errors="replace")
-                    )
+                    chunk_bytes = chunk if isinstance(chunk, bytes | bytearray) else str(chunk).encode("utf-8", errors="replace")
                     text = chunk_bytes.decode("utf-8", errors="replace")
                     for line in text.splitlines():
                         if self._log_stop_event.is_set():
@@ -141,9 +129,7 @@ class OpenLeadrVtnTestContainer:
             except (docker.errors.DockerException, OSError):
                 return
 
-        self._vtn_log_thread = threading.Thread(
-            target=_run, name="oadr310-ref-vtn-logs", daemon=True
-        )
+        self._vtn_log_thread = threading.Thread(target=_run, name="oadr310-ref-vtn-logs", daemon=True)
         self._vtn_log_thread.start()
 
     def get_vtn_log_tail(self, max_lines: int = 500) -> list[str]:
@@ -172,9 +158,7 @@ class OpenLeadrVtnTestContainer:
         )
 
         # Configure the VTN with the MQTT broker URL prior to starting it.
-        self._vtn.with_env("DATABASE_URL", value=vtn_db_url).waiting_for(
-            LogMessageWaitStrategy("pg_advisory_unlock")
-        ).start()
+        self._vtn.with_env("DATABASE_URL", value=vtn_db_url).waiting_for(LogMessageWaitStrategy("pg_advisory_unlock")).start()
         self._start_vtn_log_capture()
         return self
 

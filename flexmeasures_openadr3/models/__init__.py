@@ -14,10 +14,10 @@ from flexmeasures_openadr3.models.storage import (
 from flexmeasures_openadr3.models.views import VenSensorConfigOverview
 
 __all__ = [
+    "VEN_CLIENT_ATTRIBUTE_KEY",
     "EventActivePeriod",
     "FormValidationErrors",
     "FormValidationResult",
-    "VEN_CLIENT_ATTRIBUTE_KEY",
     "VenClientAttributePayload",
     "VenClientFormValues",
     "VenSensorConfigFormValues",

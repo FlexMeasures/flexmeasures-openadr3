@@ -19,28 +19,23 @@ class VenSensorConfigRecord:
 
     @classmethod
     def from_json(cls, data: Mapping[str, object]) -> VenSensorConfigRecord:
+        """Build a record from JSON stored on a VEN asset."""
         raw_targets = data.get("targets", [])
         targets: tuple[str, ...]
-        if isinstance(raw_targets, list):
-            targets = tuple(str(item) for item in raw_targets)
-        else:
-            targets = ()
+        targets = tuple(str(item) for item in raw_targets) if isinstance(raw_targets, list) else ()
 
         job_id = data.get("fetch_events_job_id")
         return cls(
             name=str(data.get("name", "")),
             targets=targets,
             utc_trigger_time=str(data.get("utc_trigger_time", "") or ""),
-            fetch_import_capacity_limits=bool(
-                data.get("fetch_import_capacity_limits", False)
-            ),
-            fetch_export_capacity_limits=bool(
-                data.get("fetch_export_capacity_limits", False)
-            ),
+            fetch_import_capacity_limits=bool(data.get("fetch_import_capacity_limits", False)),
+            fetch_export_capacity_limits=bool(data.get("fetch_export_capacity_limits", False)),
             fetch_events_job_id=str(job_id) if job_id is not None else None,
         )
 
     def to_json(self) -> dict[str, object]:
+        """Serialize the record for storage in asset attributes."""
         payload: dict[str, object] = {
             "name": self.name,
             "targets": list(self.targets),
@@ -66,12 +61,12 @@ class VenClientAttributePayload:
 
     @classmethod
     def empty(cls) -> VenClientAttributePayload:
+        """Return an empty VEN attribute payload."""
         return cls()
 
     @classmethod
-    def from_asset_attributes(
-        cls, attributes: Mapping[str, object] | None
-    ) -> VenClientAttributePayload:
+    def from_asset_attributes(cls, attributes: Mapping[str, object] | None) -> VenClientAttributePayload:
+        """Parse VEN settings from a generic asset's attributes column."""
         if attributes is None:
             return cls.empty()
 
@@ -81,19 +76,12 @@ class VenClientAttributePayload:
 
         raw_scopes = raw_payload.get("scopes", [])
         scopes: tuple[str, ...]
-        if isinstance(raw_scopes, list):
-            scopes = tuple(str(item) for item in raw_scopes)
-        else:
-            scopes = ()
+        scopes = tuple(str(item) for item in raw_scopes) if isinstance(raw_scopes, list) else ()
 
         raw_configs = raw_payload.get("sensor_configs", [])
         sensor_configs: tuple[VenSensorConfigRecord, ...] = ()
         if isinstance(raw_configs, list):
-            sensor_configs = tuple(
-                VenSensorConfigRecord.from_json(item)
-                for item in raw_configs
-                if isinstance(item, Mapping)
-            )
+            sensor_configs = tuple(VenSensorConfigRecord.from_json(item) for item in raw_configs if isinstance(item, Mapping))
 
         return cls(
             vtn_url=str(raw_payload.get("vtn_url", "") or ""),
@@ -105,6 +93,7 @@ class VenClientAttributePayload:
         )
 
     def to_json(self) -> dict[str, object]:
+        """Serialize the payload for storage in asset attributes."""
         return {
             "vtn_url": self.vtn_url,
             "oauth_client_id": self.oauth_client_id,

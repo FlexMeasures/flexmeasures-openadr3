@@ -1,31 +1,39 @@
+import contextlib
 from typing import cast
 
 from flask import abort, flash, redirect, request, url_for
-from werkzeug.wrappers import Response
 from flask_login import login_required
-
 from flexmeasures.data import db
 from flexmeasures.ui.utils.view_utils import render_flexmeasures_template
+from werkzeug.wrappers import Response
 
-from ... import flexmeasures_openadr3_ui_bp
-from ...models.forms import (
-    FormValidationErrors,
-    VenSensorConfigFormValues,
-    VenSensorConfigPostValues,
-)
-from ...models.views import VenSensorConfigOverview
-from ...utils.encryption import SecretsDecryptionError, SecretsEncryptor
-from ...utils.ven_clients import (
+from flexmeasures_openadr3 import flexmeasures_openadr3_ui_bp
+from flexmeasures_openadr3.models.forms import FormValidationErrors, VenSensorConfigFormValues, VenSensorConfigPostValues
+from flexmeasures_openadr3.models.views import VenSensorConfigOverview
+from flexmeasures_openadr3.utils.encryption import SecretsDecryptionError, SecretsEncryptor
+from flexmeasures_openadr3.utils.events import ACTIVE_OPENADR_EVENTS, SUPPORTED_SIGNAL_NAMES
+from flexmeasures_openadr3.utils.ven_clients import (
+    VEN_CLIENT_FORM_FIELDS,
     VenClient,
     VenClientRepository,
-    VEN_CLIENT_FORM_FIELDS,
     build_ven_client_form_values,
     build_ven_sensor_config_form_values,
     validate_ven_client_form,
     validate_ven_sensor_config_form,
 )
-from ...utils.events import ACTIVE_OPENADR_EVENTS, SUPPORTED_SIGNAL_NAMES
-from ...utils.ven_jobs import VenFetchJobScheduler
+from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
+
+_HOUR_MINUTE_COMPONENT_COUNT = 2
+_MAX_HOUR = 23
+_MAX_MINUTE = 59
+
+
+def _require_validated_data[T](data: T | None) -> T:
+    """Return validated form data or raise if it is unexpectedly missing."""
+    if data is None:
+        msg = "Validated form data missing despite successful validation."
+        raise RuntimeError(msg)
+    return data
 
 
 def _build_repository() -> VenClientRepository:
@@ -39,7 +47,8 @@ def _build_job_scheduler(repository: VenClientRepository) -> VenFetchJobSchedule
 
 
 def _utc_trigger_time_from_request(raw: str) -> str:
-    """Normalize HTML time input values to HH:MM:SS for validation.
+    """
+    Normalize HTML time input values to HH:MM:SS for validation.
 
     Browsers may submit HH:MM when seconds are zero; the form validator
     expects three colon-separated parts.
@@ -48,9 +57,9 @@ def _utc_trigger_time_from_request(raw: str) -> str:
     if not stripped:
         return ""
     parts = stripped.split(":")
-    if len(parts) == 2 and all(p.isdigit() for p in parts):
+    if len(parts) == _HOUR_MINUTE_COMPONENT_COUNT and all(p.isdigit() for p in parts):
         hour, minute = int(parts[0]), int(parts[1])
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
+        if 0 <= hour <= _MAX_HOUR and 0 <= minute <= _MAX_MINUTE:
             return f"{hour:02d}:{minute:02d}:00"
     return stripped
 
@@ -59,34 +68,23 @@ def _sensor_config_post_values_from_request() -> VenSensorConfigPostValues:
     return VenSensorConfigPostValues(
         name=request.form.get("name", "").strip(),
         targets=request.form.get("targets", "").strip(),
-        utc_trigger_time=_utc_trigger_time_from_request(
-            request.form.get("utc_trigger_time", "")
-        ),
-        fetch_import_capacity_limits=request.form.get("fetch_import_capacity_limits")
-        == "on",
-        fetch_export_capacity_limits=request.form.get("fetch_export_capacity_limits")
-        == "on",
+        utc_trigger_time=_utc_trigger_time_from_request(request.form.get("utc_trigger_time", "")),
+        fetch_import_capacity_limits=request.form.get("fetch_import_capacity_limits") == "on",
+        fetch_export_capacity_limits=request.form.get("fetch_export_capacity_limits") == "on",
     )
 
 
 def _decrypt_ven_client_credentials_for_form(ven_client: VenClient) -> VenClient:
-    """Decrypt VEN credentials for UI rendering.
+    """
+    Decrypt VEN credentials for UI rendering.
 
     If credentials are already plaintext (legacy records), keep them unchanged.
     """
     secrets_encryptor = SecretsEncryptor.from_current_app()
-    try:
-        ven_client.oauth_client_id = secrets_encryptor.decrypt(
-            ven_client.oauth_client_id
-        )
-    except SecretsDecryptionError:
-        pass
-    try:
-        ven_client.oauth_client_secret = secrets_encryptor.decrypt(
-            ven_client.oauth_client_secret
-        )
-    except SecretsDecryptionError:
-        pass
+    with contextlib.suppress(SecretsDecryptionError):
+        ven_client.oauth_client_id = secrets_encryptor.decrypt(ven_client.oauth_client_id)
+    with contextlib.suppress(SecretsDecryptionError):
+        ven_client.oauth_client_secret = secrets_encryptor.decrypt(ven_client.oauth_client_secret)
     return ven_client
 
 
@@ -96,17 +94,10 @@ def _decrypt_ven_client_credentials_for_form(ven_client: VenClient) -> VenClient
 def dashboard() -> str:
     """Render the OpenADR 3 dashboard."""
     ven_client_repository = _build_repository()
-    active_events = tuple(
-        event
-        for event in ACTIVE_OPENADR_EVENTS
-        if all(
-            pd.payload_type in SUPPORTED_SIGNAL_NAMES
-            for pd in event.payload_descriptors or ()
-        )
-    )
+    active_events = tuple(event for event in ACTIVE_OPENADR_EVENTS if all(pd.payload_type in SUPPORTED_SIGNAL_NAMES for pd in event.payload_descriptors or ()))
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_dashboard.html",
             ven_clients=ven_client_repository.list_ven_clients(),
@@ -140,7 +131,7 @@ def sensor_configs_overview(ven_id: int) -> str:
     ]
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_sensor_configs_overview.html",
             ven_client=ven_client,
@@ -158,9 +149,7 @@ def ven_client_new() -> str | Response:
     errors = FormValidationErrors()
 
     if request.method == "POST":
-        field_values = field_values.with_request_fields(
-            VEN_CLIENT_FORM_FIELDS, request.form
-        )
+        field_values = field_values.with_request_fields(VEN_CLIENT_FORM_FIELDS, request.form)
         validation = validate_ven_client_form(
             field_values=field_values,
             ven_client_repository=ven_client_repository,
@@ -168,14 +157,13 @@ def ven_client_new() -> str | Response:
         errors = validation.errors
 
         if validation.is_valid:
-            assert validation.data is not None
-            ven_client = ven_client_repository.create(validation.data)
+            ven_client = ven_client_repository.create(_require_validated_data(validation.data))
             db.session.commit()
             flash(f"VEN client '{ven_client.name}' created.")
             return redirect(url_for(".dashboard"))
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_client_new.html",
             form_values=field_values,
@@ -195,7 +183,7 @@ def ven_client_detail(ven_id: int) -> str:
     ven_client = _decrypt_ven_client_credentials_for_form(ven_client)
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_client_detail.html",
             ven_client=ven_client,
@@ -214,9 +202,7 @@ def ven_client_update(ven_id: int) -> str | Response:
     if ven_client is None:
         abort(404)
 
-    field_values = build_ven_client_form_values(ven_client).with_request_fields(
-        VEN_CLIENT_FORM_FIELDS, request.form
-    )
+    field_values = build_ven_client_form_values(ven_client).with_request_fields(VEN_CLIENT_FORM_FIELDS, request.form)
     validation = validate_ven_client_form(
         field_values,
         ven_client_repository=ven_client_repository,
@@ -224,7 +210,7 @@ def ven_client_update(ven_id: int) -> str | Response:
     )
     if not validation.is_valid:
         return cast(
-            str,
+            "str",
             render_flexmeasures_template(
                 "flexmeasures_oadr3_ven_client_detail.html",
                 ven_client=ven_client,
@@ -233,8 +219,7 @@ def ven_client_update(ven_id: int) -> str | Response:
             ),
         )
 
-    assert validation.data is not None
-    ven_client = ven_client_repository.update(ven_client, validation.data)
+    ven_client = ven_client_repository.update(ven_client, _require_validated_data(validation.data))
     db.session.commit()
     flash(f"VEN client '{ven_client.name}' updated.")
     return redirect(url_for(".ven_client_detail", ven_id=ven_client.id))
@@ -257,9 +242,7 @@ def ven_client_delete(ven_id: int) -> Response:
     return redirect(url_for(".dashboard"))
 
 
-@flexmeasures_openadr3_ui_bp.route(
-    "/ven-clients/<int:ven_id>/sensor-configs/new", methods=["GET"]
-)
+@flexmeasures_openadr3_ui_bp.route("/ven-clients/<int:ven_id>/sensor-configs/new", methods=["GET"])
 @login_required
 def ven_client_sensor_config_new(ven_id: int) -> str:
     """Render the 'new polling schedule' form for a VEN client."""
@@ -269,23 +252,19 @@ def ven_client_sensor_config_new(ven_id: int) -> str:
         abort(404)
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_sensor_config_form.html",
             ven_client=ven_client,
             form_values=build_ven_sensor_config_form_values(ven_client),
             form_errors=FormValidationErrors(),
-            form_action=url_for(
-                ".ven_client_sensor_config_create", ven_id=ven_client.id
-            ),
+            form_action=url_for(".ven_client_sensor_config_create", ven_id=ven_client.id),
             title="Add polling schedule",
         ),
     )
 
 
-@flexmeasures_openadr3_ui_bp.route(
-    "/ven-clients/<int:ven_id>/sensor-configs", methods=["POST"]
-)
+@flexmeasures_openadr3_ui_bp.route("/ven-clients/<int:ven_id>/sensor-configs", methods=["POST"])
 @login_required
 def ven_client_sensor_config_create(ven_id: int) -> str | Response:
     """Handle form submission for creating a polling schedule."""
@@ -296,13 +275,11 @@ def ven_client_sensor_config_create(ven_id: int) -> str | Response:
         abort(404)
 
     post_values = _sensor_config_post_values_from_request()
-    validation = validate_ven_sensor_config_form(
-        post_values, existing_configs=ven_client.sensor_configs
-    )
+    validation = validate_ven_sensor_config_form(post_values, existing_configs=ven_client.sensor_configs)
     if validation.is_valid:
-        assert validation.data is not None
         sensor_config = ven_client_repository.append_sensor_config(
-            ven_client, validation.data
+            ven_client,
+            _require_validated_data(validation.data),
         )
         job_scheduler.schedule(ven_client, sensor_config)
         db.session.commit()
@@ -310,15 +287,13 @@ def ven_client_sensor_config_create(ven_id: int) -> str | Response:
         return redirect(url_for(".dashboard"))
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_sensor_config_form.html",
             ven_client=ven_client,
             form_values=VenSensorConfigFormValues.from_post_values(post_values),
             form_errors=validation.errors,
-            form_action=url_for(
-                ".ven_client_sensor_config_create", ven_id=ven_client.id
-            ),
+            form_action=url_for(".ven_client_sensor_config_create", ven_id=ven_client.id),
             title="Add polling schedule",
         ),
     )
@@ -364,7 +339,7 @@ def ven_client_sensor_config_edit(ven_id: int, config_name: str) -> str:
         abort(404)
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_sensor_config_form.html",
             ven_client=ven_client,
@@ -408,12 +383,14 @@ def ven_client_sensor_config_update(ven_id: int, config_name: str) -> str | Resp
         current_name=config_name,
     )
     if validation.is_valid:
-        assert validation.data is not None
         existing_config = ven_client.get_sensor_config(config_name)
-        assert existing_config is not None
+        if existing_config is None:
+            abort(404)
         job_scheduler.delete(existing_config)
         updated_config = ven_client_repository.update_sensor_config(
-            ven_client, config_name, validation.data
+            ven_client,
+            config_name,
+            _require_validated_data(validation.data),
         )
         job_scheduler.schedule(ven_client, updated_config)
         db.session.commit()
@@ -421,7 +398,7 @@ def ven_client_sensor_config_update(ven_id: int, config_name: str) -> str | Resp
         return redirect(url_for(".dashboard"))
 
     return cast(
-        str,
+        "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_ven_sensor_config_form.html",
             ven_client=ven_client,

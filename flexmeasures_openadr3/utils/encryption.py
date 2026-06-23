@@ -1,18 +1,17 @@
-from flask import current_app
-
 import base64
 from dataclasses import dataclass
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from flask import current_app
 
 
 class SecretsEncryptionError(Exception):
     """Raised when secrets encryption/decryption fails."""
 
 
-class InvalidSecretsEncryptionKey(SecretsEncryptionError):
+class InvalidSecretsEncryptionKeyError(SecretsEncryptionError):
     """Raised when a usable master key cannot be loaded."""
 
 
@@ -40,16 +39,17 @@ class SecretsEncryptor:
 
     @classmethod
     def from_current_app(cls) -> "SecretsEncryptor":
+        """Build an encryptor using keys from the current Flask app config."""
         encryption_key = cls._get_secrets_encryption_key()
         if not isinstance(encryption_key, str) or not encryption_key.strip():
-            raise InvalidSecretsEncryptionKey(
-                "Missing OPENADR_SECRETS_ENCRYPTION_KEY or SECRET_KEY."
-            )
+            msg = "Missing OPENADR_SECRETS_ENCRYPTION_KEY or SECRET_KEY."
+            raise InvalidSecretsEncryptionKeyError(msg)
         return cls(_encryption_key=encryption_key)
 
     def _fernet_for(self, secret_key: str) -> Fernet:
         if not isinstance(secret_key, str) or not secret_key:
-            raise InvalidSecretsEncryptionKey("secret_key must be a non-empty string.")
+            msg = "secret_key must be a non-empty string."
+            raise InvalidSecretsEncryptionKeyError(msg)
 
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
@@ -63,7 +63,8 @@ class SecretsEncryptor:
     def encrypt(self, value: str) -> str:
         """Encrypt a string and return a URL-safe token."""
         if not isinstance(value, str):
-            raise SecretsEncryptionError("value must be a string.")
+            msg = "value must be a string."
+            raise SecretsEncryptionError(msg)
 
         token = self._fernet_for(self._encryption_key).encrypt(value.encode("utf-8"))
         return token.decode("utf-8")
@@ -71,12 +72,12 @@ class SecretsEncryptor:
     def decrypt(self, token: str) -> str:
         """Decrypt a token and return the original string."""
         if not isinstance(token, str):
-            raise SecretsDecryptionError("token must be a string.")
+            msg = "token must be a string."
+            raise SecretsDecryptionError(msg)
 
         try:
             raw = self._fernet_for(self._encryption_key).decrypt(token.encode("utf-8"))
         except InvalidToken as exc:
-            raise SecretsDecryptionError(
-                "Invalid token for the given encryption_key."
-            ) from exc
+            msg = "Invalid token for the given encryption_key."
+            raise SecretsDecryptionError(msg) from exc
         return raw.decode("utf-8")

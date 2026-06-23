@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import random
-from typing import Tuple
 import uuid
+from datetime import UTC, datetime, timedelta
 
+from openadr3_client._models.common.interval_period import IntervalPeriod
 from openadr3_client.bl.http_factory import BusinessLogicHttpClientFactory
 from openadr3_client.oadr310._bl.client import BusinessLogicClient
 from openadr3_client.oadr310._ven.client import VirtualEndNodeClient
@@ -19,7 +19,6 @@ from openadr3_client.oadr310.models.event.event_payload import (
 from openadr3_client.oadr310.models.program.program import NewProgram
 from openadr3_client.oadr310.models.unit import Unit
 from openadr3_client.ven.http_factory import VirtualEndNodeHttpClientFactory
-from openadr3_client._models.common.interval_period import IntervalPeriod
 from openadr3_client.version import OADRVersion
 
 from tests.test_container.integration_types import IntegrationTestVTNClient
@@ -73,7 +72,7 @@ def seed_capacity_limit_event(
     export capacity limit value. FlexMeasures stores one belief per interval at the
     interval start when the VEN fetch job runs.
     """
-    event_start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=1)
+    event_start = datetime.now(UTC).replace(microsecond=0) + timedelta(hours=1)
     event_duration = timedelta(hours=24)
     payload_descriptors = (
         EventPayloadDescriptor(
@@ -93,7 +92,7 @@ def seed_capacity_limit_event(
         )
     )
 
-    intervals: Tuple[Interval[EventPayload], ...] = ()
+    intervals: tuple[Interval[EventPayload], ...] = ()
 
     for i in range(event_duration // timedelta(minutes=15)):
         intervals += (

@@ -82,9 +82,45 @@ warn_return_any = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["flask_login.*", "flexmeasures.*", "tests.*", "testcontainers.*"]
+module = ["flask_login.*", "flexmeasures.*", "tests.*", "testcontainers.*", "settings"]
 ignore_missing_imports = true
 disallow_untyped_defs = false
 
 [tool.ruff]
-# Your ruff config here
+line-length = 175
+
+[tool.ruff.lint]
+select = ["ALL"]
+
+# Do not require docstrings for functions, methods and classes
+ignore = [
+    # From:https://github.com/wemake-services/wemake-django-template/blob/master/pyproject.toml
+    "A005",   # allow to shadow stdlib and builtin module names
+    "COM812", # trailing comma, conflicts with `ruff format`
+    # Different doc rules that we don't really care about:
+    "D100",
+    "D104",
+    "D106",
+    "D203",
+    "D212",
+    "D401",
+    "D404",
+    "D405",
+    "ISC001",  # implicit string concat conflicts with `ruff format`
+    "ISC003",  # prefer explicit string concat over implicit concat
+    "PLR09",   # we have our own complexity rules
+    # "PLR2004", # do not report magic numbers -> I do want to report magic numbers
+    "PLR6301", # do not require classmethod / staticmethod when self not used
+    "TRY003",  # long exception messages from `tryceratops`
+    # Start of own error codes
+    "ANN002", # Ignore unused *args
+    "ANN003", # Ignore unused **kwargs
+    "D107", # Allow undocumented __init__
+    "TC001", # Move to type checking block (does not play nice with pydantic models)
+    "TC002", # Move to type checking block (does not play nice with pydantic models)
+]
+
+# Ignores S101 ("Use of 'assert' detected") for the tests.
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ANN201", "SLF001", "S106", "S105", "S311", "PLR2004", "PT018"]
+"examples/**" = ["EXE001", "T201", "S311", "S105", "INP001", "SLF001"]

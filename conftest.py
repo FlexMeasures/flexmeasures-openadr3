@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from flask import Flask
-
 from flexmeasures.app import create as create_flexmeasures_app
 
 from tests.test_container.flexmeasures_test_postgres_container import (
     FlexMeasuresTestPostgres,
     FlexMeasuresTestPostgresContainer,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytest_plugins = [
     "flexmeasures.conftest",
@@ -22,9 +24,7 @@ pytest_plugins = [
 
 @pytest.fixture(scope="session")
 def integration_test_flexmeasures_postgres() -> Iterator[FlexMeasuresTestPostgres]:
-    """
-    Session-scoped PostgreSQL testcontainer for FlexMeasures during integration tests.
-    """
+    """Session-scoped PostgreSQL testcontainer for FlexMeasures during integration tests."""
     with FlexMeasuresTestPostgresContainer() as postgres_container:
         yield postgres_container.get_connection_info()
 
@@ -37,9 +37,7 @@ def app(
     # FlexMeasures reads this env var during create_app() (see read_config in testing mode).
     # Setting SQLALCHEMY_DATABASE_URI on the app config afterwards is too late: db.init_app()
     # already created a cached engine bound to TestingConfig's localhost default.
-    os.environ["SQLALCHEMY_TEST_DATABASE_URI"] = (
-        integration_test_flexmeasures_postgres.database_uri
-    )
+    os.environ["SQLALCHEMY_TEST_DATABASE_URI"] = integration_test_flexmeasures_postgres.database_uri
 
     test_app = create_flexmeasures_app(
         env="testing",

@@ -12,8 +12,7 @@ import os
 import random
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Tuple
+from datetime import UTC, datetime, timedelta
 
 from openadr3_client._models.common.interval_period import IntervalPeriod
 from openadr3_client.bl.http_factory import BusinessLogicHttpClientFactory
@@ -27,7 +26,6 @@ from openadr3_client.oadr310.models.event.event_payload import (
 from openadr3_client.oadr310.models.program.program import NewProgram
 from openadr3_client.oadr310.models.unit import Unit
 from openadr3_client.version import OADRVersion
-
 from settings import (
     BL_OAUTH_CLIENT_ID,
     HOST_KEYCLOAK_TOKEN_URL,
@@ -64,7 +62,7 @@ def seed_capacity_limit_event(
     The event starts one hour from the current UTC time and spans 24 hours as
     96 consecutive 15-minute intervals — matching tests/test_container/openadr_vtn_setup.py.
     """
-    event_start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=1)
+    event_start = datetime.now(UTC).replace(microsecond=0) + timedelta(hours=1)
     event_duration = timedelta(hours=24)
     payload_descriptors = (
         EventPayloadDescriptor(
@@ -84,7 +82,7 @@ def seed_capacity_limit_event(
         )
     )
 
-    intervals: Tuple[Interval[EventPayload], ...] = ()
+    intervals: tuple[Interval[EventPayload], ...] = ()
     for i in range(event_duration // timedelta(minutes=15)):
         intervals += (
             Interval(
@@ -118,19 +116,12 @@ def seed_capacity_limit_event(
 
 
 def main() -> None:
+    """Seed a capacity-limit event on the VTN and print a short summary."""
     print("Connecting to VTN at", HOST_VTN_BASE_URL)
     bl_client = create_bl_client()
     event = seed_capacity_limit_event(bl_client)
-    first_start = (
-        event.intervals[0].interval_period.start
-        if event.intervals and event.intervals[0].interval_period
-        else None
-    )
-    last_start = (
-        event.intervals[-1].interval_period.start
-        if event.intervals and event.intervals[-1].interval_period
-        else None
-    )
+    first_start = event.intervals[0].interval_period.start if event.intervals and event.intervals[0].interval_period else None
+    last_start = event.intervals[-1].interval_period.start if event.intervals and event.intervals[-1].interval_period else None
     print(f"Created event id={event.id} with {len(event.intervals or ())} intervals.")
     if first_start and last_start:
         print(f"  First interval start (UTC): {first_start.isoformat()}")

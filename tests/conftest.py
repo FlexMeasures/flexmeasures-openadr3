@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from flask import Flask
 from flask_login import login_user
 from flask_sqlalchemy import SQLAlchemy
-
 from flexmeasures.data.models.user import User
+from openadr3_client.oadr310.models.event.event import ExistingEvent
+from testcontainers.core.network import Network
+from testcontainers.keycloak import KeycloakContainer
 
 from flexmeasures_openadr3.utils.ven_clients import (
     VenClient,
@@ -18,13 +22,6 @@ from flexmeasures_openadr3.utils.ven_clients import (
     VenSensorConfigFormData,
 )
 from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
-
-import os
-from pathlib import Path
-from typing import Iterable
-from openadr3_client.oadr310.models.event.event import ExistingEvent
-from testcontainers.core.network import Network
-from testcontainers.keycloak import KeycloakContainer
 from tests.test_container.integration_types import (
     IntegrationTestVTNClient,
     IntegrationTestVTNServer,
@@ -38,6 +35,8 @@ from tests.test_container.openadr_vtn_setup import (
     seed_capacity_limit_event,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 _TESTS_ROOT = Path(__file__).resolve().parents[0]
 _KEYCLOAK_REALM_IMPORT_FILE = _TESTS_ROOT / "keycloak_integration_realm.json"
@@ -52,9 +51,7 @@ KEYCLOAK_VEN1_CLIENT_ID = "test-ven-1"
 KEYCLOAK_VEN2_CLIENT_ID = "test-ven-2"
 KEYCLOAK_VEN_CLIENT_SECRET = "my-client-secret"
 
-KEYCLOAK_INTERNAL_BASE_URL = (
-    f"http://keycloak:8080/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect"
-)
+KEYCLOAK_INTERNAL_BASE_URL = f"http://keycloak:8080/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect"
 KEYCLOAK_INTERNAL_TOKEN_URL = f"{KEYCLOAK_INTERNAL_BASE_URL}/token"
 KEYCLOAK_INTERNAL_JWKS_URL = f"{KEYCLOAK_INTERNAL_BASE_URL}/certs"
 
@@ -142,16 +139,16 @@ def logged_in_prosumer(
 
 @pytest.fixture
 def created_ven_client(
-    fresh_db: object,
+    fresh_db: object,  # noqa: ARG001
     db: SQLAlchemy,
-    logged_in_prosumer: User,
+    logged_in_prosumer: User,  # noqa: ARG001
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
-) -> Iterator[VenClient]:
+) -> VenClient:
     """VEN client persisted in the database."""
     ven_client = ven_client_repository.create(sample_ven_client_form_data)
     db.session.commit()
-    yield ven_client
+    return ven_client
 
 
 @pytest.fixture
@@ -160,7 +157,7 @@ def created_ven_client_with_schedule(
     created_ven_client: VenClient,
     ven_client_repository: VenClientRepository,
     sample_sensor_config_form_data: VenSensorConfigFormData,
-) -> Iterator[VenClient]:
+) -> VenClient:
     """VEN client with one polling schedule and linked sensors."""
     sensor_config = ven_client_repository.append_sensor_config(
         created_ven_client,
@@ -168,7 +165,7 @@ def created_ven_client_with_schedule(
     )
     db.session.commit()
     assert sensor_config is not None
-    yield created_ven_client
+    return created_ven_client
 
 
 @pytest.fixture(scope="session")
@@ -227,10 +224,7 @@ def integration_test_oauth_client_bl_client(
         IntegrationTestOAuthClient: The integration test oauth client.
 
     """
-    token_url = (
-        integration_test_auth_server.get_url()
-        + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
-    )
+    token_url = integration_test_auth_server.get_url() + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
     return OAuthConfiguration(
         client_id=KEYCLOAK_BL_CLIENT_ID,
         client_secret=KEYCLOAK_BL_CLIENT_SECRET,
@@ -279,10 +273,7 @@ def bl_oauth_configuration(
     Yields an OAuthConfiguration which contains an oauth client that was created
     for the scope of this test session. This OAUTH client is configured to have the BL scopes inside an OpenADR VTN.
     """
-    token_url = (
-        integration_test_auth_server.get_url()
-        + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
-    )
+    token_url = integration_test_auth_server.get_url() + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
     return OAuthConfiguration(
         client_id=KEYCLOAK_BL_CLIENT_ID,
         client_secret=KEYCLOAK_BL_CLIENT_SECRET,
@@ -302,10 +293,7 @@ def ven_oauth_configuration(
     Yields an OAuthConfiguration which contains an oauth client that was created
     for the scope of this test session. This OAUTH client is configured to have the VEN scopes inside an OpenADR VTN.
     """
-    token_url = (
-        integration_test_auth_server.get_url()
-        + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
-    )
+    token_url = integration_test_auth_server.get_url() + f"/realms/{KEYCLOAK_REALM_NAME}/protocol/openid-connect/token"
     return OAuthConfiguration(
         client_id=KEYCLOAK_VEN1_CLIENT_ID,
         client_secret=KEYCLOAK_VEN_CLIENT_SECRET,
@@ -321,8 +309,7 @@ def bl_client(
     bl_oauth_configuration: OAuthConfiguration,
 ) -> IntegrationTestVTNClient:
     """
-    Returns an IntegrationTestVTNClient which contains VTN server information and an OAUTH configuration which can be used
-    to fetch a BL access token to communicate with the VTN.
+    Return a BL-side VTN client with server info and OAuth credentials.
 
     Args:
         integration_test_openadr310_vtn_server (IntegrationTestVTNServer): OpenLEADR-rs VTN server.
@@ -344,8 +331,7 @@ def ven_client(
     ven_oauth_configuration: OAuthConfiguration,
 ) -> IntegrationTestVTNClient:
     """
-    Returns an IntegrationTestVTNClient which contains VTN server information and an OAUTH configuration which can be used
-    to fetch a VEN access token to communicate with the VTN.
+    Return a VEN-side VTN client with server info and OAuth credentials.
 
     Args:
         integration_test_openadr310_vtn_server (IntegrationTestVTNServer): OpenLEADR-rs VTN server.
@@ -367,7 +353,6 @@ def vtn_capacity_limit_event_seed(
 ) -> ExistingEvent:
     """Program + 24h capacity-limit event on the VTN, starting one hour from seed time."""
     bl_http = create_bl_http_client(bl_client)
-    seeded_event = seed_capacity_limit_event(
+    return seed_capacity_limit_event(
         bl_http,
     )
-    return seeded_event

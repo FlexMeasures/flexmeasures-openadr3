@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import cast
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, cast
 
 from flask import current_app
+from flexmeasures.data import db  # type: ignore[import-untyped]
 from flexmeasures.data.models.time_series import Sensor, TimedBelief
 from flexmeasures.data.services.data_sources import get_or_create_source
 from openadr3_client.oadr310._vtn.interfaces.filters import TargetFilter
@@ -15,13 +15,15 @@ from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
 
-from flexmeasures.data import db  # type: ignore[import-untyped]
 from flexmeasures_openadr3.models.jobs import EventActivePeriod
 from flexmeasures_openadr3.utils.ven_clients import (
     VenClient,
     VenClientRepository,
     VenSensorConfig,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 OPENADR_EVENT_SOURCE_NAME = "OpenADR 3 VTN"
 OPENADR_EVENT_SOURCE_TYPE = "gateway"
@@ -44,22 +46,14 @@ class PayloadTypeSensorMapping:
     export_sensor: Sensor | None = None
 
     @classmethod
-    def from_sensor_config(
-        cls, sensor_config: VenSensorConfig
-    ) -> PayloadTypeSensorMapping:
-        import_sensor = (
-            sensor_config.import_sensor
-            if sensor_config.fetch_import_capacity_limits
-            else None
-        )
-        export_sensor = (
-            sensor_config.export_sensor
-            if sensor_config.fetch_export_capacity_limits
-            else None
-        )
+    def from_sensor_config(cls, sensor_config: VenSensorConfig) -> PayloadTypeSensorMapping:
+        """Build a mapping from a polling schedule's enabled limit types."""
+        import_sensor = sensor_config.import_sensor if sensor_config.fetch_import_capacity_limits else None
+        export_sensor = sensor_config.export_sensor if sensor_config.fetch_export_capacity_limits else None
         return cls(import_sensor=import_sensor, export_sensor=export_sensor)
 
     def get_sensor_for(self, payload_type: EventPayloadType) -> Sensor | None:
+        """Return the FlexMeasures sensor for an OpenADR payload type."""
         if payload_type is EventPayloadType.IMPORT_CAPACITY_LIMIT:
             return self.import_sensor
         if payload_type is EventPayloadType.EXPORT_CAPACITY_LIMIT:
@@ -67,6 +61,7 @@ class PayloadTypeSensorMapping:
         return None
 
     def __bool__(self) -> bool:
+        """Return whether at least one sensor is configured."""
         return self.import_sensor is not None or self.export_sensor is not None
 
 
@@ -76,7 +71,7 @@ def _build_job_id(ven_id: int, config_name: str, run_at: datetime) -> str:
 
 def _next_daily_trigger_datetime(utc_trigger_time: str) -> datetime:
     hour, minute, second = (int(part) for part in utc_trigger_time.split(":"))
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     trigger = now_utc.replace(hour=hour, minute=minute, second=second, microsecond=0)
     if trigger <= now_utc:
         trigger += timedelta(days=1)
@@ -84,7 +79,7 @@ def _next_daily_trigger_datetime(utc_trigger_time: str) -> datetime:
 
 
 def _fetch_events_queue() -> Queue:
-    return cast(Queue, current_app.queues[FETCH_EVENTS_QUEUE_NAME])
+    return cast("Queue", current_app.queues[FETCH_EVENTS_QUEUE_NAME])
 
 
 def _delete_job(job_id: str) -> None:
@@ -96,20 +91,15 @@ def _delete_job(job_id: str) -> None:
     existing_job.delete()
 
 
-def _get_interval_period(
-    event: ExistingEvent, interval: Interval
-) -> tuple[datetime, datetime]:
+def _get_interval_period(event: ExistingEvent, interval: Interval) -> tuple[datetime, datetime]:
     interval_period = interval.interval_period or event.interval_period
     if interval_period is None:
-        raise ValueError(
-            f"OpenADR event '{event.id}' interval '{interval.id}' has no interval period."
-        )
+        msg = f"OpenADR event '{event.id}' interval '{interval.id}' has no interval period."
+        raise ValueError(msg)
     return interval_period.start, interval_period.start + interval_period.duration
 
 
-def _iter_sensor_event_starts(
-    start: datetime, end: datetime, event_resolution: timedelta
-) -> Iterator[datetime]:
+def _iter_sensor_event_starts(start: datetime, end: datetime, event_resolution: timedelta) -> Iterator[datetime]:
     if event_resolution == timedelta(0):
         yield start
         return
@@ -121,11 +111,7 @@ def _iter_sensor_event_starts(
 
 
 def _get_supported_event_payload_types(event: ExistingEvent) -> set[EventPayloadType]:
-    return {
-        pd.payload_type
-        for pd in (event.payload_descriptors or ())
-        if pd.payload_type in SUPPORTED_DR_PAYLOAD_TYPES
-    }
+    return {pd.payload_type for pd in (event.payload_descriptors or ()) if pd.payload_type in SUPPORTED_DR_PAYLOAD_TYPES}
 
 
 def _collect_active_periods(events: list[ExistingEvent]) -> list[EventActivePeriod]:
@@ -133,26 +119,23 @@ def _collect_active_periods(events: list[ExistingEvent]) -> list[EventActivePeri
     for event in events:
         for interval in event.intervals or ():
             start, end = _get_interval_period(event, interval)
-            active_periods.append(
-                EventActivePeriod(start=start, end=end, event_id=event.id)
-            )
+            active_periods.append(EventActivePeriod(start=start, end=end, event_id=event.id))
     return active_periods
 
 
 def _validate_no_overlapping_events(events: list[ExistingEvent]) -> None:
-    active_periods = sorted(
-        _collect_active_periods(events), key=lambda period: period.start
-    )
+    active_periods = sorted(_collect_active_periods(events), key=lambda period: period.start)
     for index, period in enumerate(active_periods):
         for previous in active_periods[:index]:
             if previous.event_id == period.event_id:
                 continue
             if previous.start < period.end and period.start < previous.end:
-                raise OverlappingDemandResponseEventsError(
+                msg = (
                     f"OpenADR events overlap: "
                     f"event '{previous.event_id}' active from {previous.start} to {previous.end}, "
                     f"event '{period.event_id}' active from {period.start} to {period.end}."
                 )
+                raise OverlappingDemandResponseEventsError(msg)
 
 
 def _fetch_events(ven_client: VenClient, targets: list[str]) -> list[ExistingEvent]:
@@ -186,14 +169,10 @@ def _store_event_payloads(
                 if sensor is None:
                     continue
                 if len(payload.values) != 1:
-                    raise ValueError(
-                        f"OpenADR event '{event.id}' interval '{interval.id}' "
-                        f"payload '{payload.type}' has {len(payload.values)} values."
-                    )
+                    msg = f"OpenADR event '{event.id}' interval '{interval.id}' payload '{payload.type}' has {len(payload.values)} values."
+                    raise ValueError(msg)
 
-                for belief_start in _iter_sensor_event_starts(
-                    start, end, sensor.event_resolution
-                ):
+                for belief_start in _iter_sensor_event_starts(start, end, sensor.event_resolution):
                     db.session.merge(
                         TimedBelief(
                             sensor=sensor,
@@ -218,6 +197,7 @@ class VenFetchJobScheduler:
         self,
         ven_client: VenClient,
         sensor_config: VenSensorConfig,
+        *,
         replace_existing: bool = True,
     ) -> Job | None:
         """Schedule or reschedule the daily fetch-events job for a sensor config."""
@@ -249,7 +229,7 @@ class VenFetchJobScheduler:
         )
 
         self._repository.persist_job_id(ven_client, sensor_config.name, job.id)
-        return cast(Job, job)
+        return cast("Job", job)
 
     def delete(self, sensor_config: VenSensorConfig) -> None:
         """Delete the scheduled job for a single sensor config."""
@@ -265,9 +245,7 @@ class VenFetchJobScheduler:
         """Fetch events for a sensor config and store the resulting beliefs."""
         ven_client = self._repository.find_by_id(ven_id)
         if ven_client is None:
-            current_app.logger.warning(
-                "Stopping fetch-events job: VEN id '%s' no longer exists.", ven_id
-            )
+            current_app.logger.warning("Stopping fetch-events job: VEN id '%s' no longer exists.", ven_id)
             return
 
         sensor_config = ven_client.get_sensor_config(config_name)
