@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from datetime import time
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ class VenSensorConfigFormValues:
 
     name: str = ""
     targets: str = ""
-    utc_trigger_time: str = ""
+    utc_trigger_time: time | None = None
     fetch_import_capacity_limits: str = ""
     fetch_export_capacity_limits: str = ""
 
@@ -107,10 +108,14 @@ class VenSensorConfigFormValues:
     @classmethod
     def from_post_values(cls, post_values: VenSensorConfigPostValues) -> VenSensorConfigFormValues:
         """Build display form values from validated POST data."""
+        try:
+            parsed_time: time | None = time.fromisoformat(post_values.utc_trigger_time)
+        except (ValueError, AttributeError):
+            parsed_time = None
         return cls(
             name=post_values.name,
             targets=post_values.targets,
-            utc_trigger_time=post_values.utc_trigger_time,
+            utc_trigger_time=parsed_time,
             fetch_import_capacity_limits="on" if post_values.fetch_import_capacity_limits else "",
             fetch_export_capacity_limits="on" if post_values.fetch_export_capacity_limits else "",
         )

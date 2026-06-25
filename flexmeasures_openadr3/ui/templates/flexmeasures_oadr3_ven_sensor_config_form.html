@@ -65,7 +65,7 @@
                     </span>
                   </span>
                 </label>
-                <input id="utc_trigger_time" name="utc_trigger_time" type="time" step="1" class="form-control{% if form_errors.utc_trigger_time %} is-invalid{% endif %}" value="{{ form_values.utc_trigger_time }}" required>
+                <input id="utc_trigger_time" name="utc_trigger_time" type="time" step="1" class="form-control{% if form_errors.utc_trigger_time %} is-invalid{% endif %}" value="{{ form_values.utc_trigger_time or '' }}" required>
                 {% if form_errors.utc_trigger_time %}
                 <div class="invalid-feedback">{{ form_errors.utc_trigger_time }}</div>
                 {% endif %}

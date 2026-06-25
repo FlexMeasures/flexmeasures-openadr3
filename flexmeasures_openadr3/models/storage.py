@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import time
 
 VEN_CLIENT_ATTRIBUTE_KEY = "ven_client"
 
@@ -12,7 +13,7 @@ class VenSensorConfigRecord:
 
     name: str
     targets: tuple[str, ...] = ()
-    utc_trigger_time: str = ""
+    utc_trigger_time: time | None = None
     fetch_import_capacity_limits: bool = False
     fetch_export_capacity_limits: bool = False
     fetch_events_job_id: str | None = None
@@ -25,10 +26,11 @@ class VenSensorConfigRecord:
         targets = tuple(str(item) for item in raw_targets) if isinstance(raw_targets, list) else ()
 
         job_id = data.get("fetch_events_job_id")
+        raw_time = str(data.get("utc_trigger_time", "") or "")
         return cls(
             name=str(data.get("name", "")),
             targets=targets,
-            utc_trigger_time=str(data.get("utc_trigger_time", "") or ""),
+            utc_trigger_time=time.fromisoformat(raw_time) if raw_time else None,
             fetch_import_capacity_limits=bool(data.get("fetch_import_capacity_limits", False)),
             fetch_export_capacity_limits=bool(data.get("fetch_export_capacity_limits", False)),
             fetch_events_job_id=str(job_id) if job_id is not None else None,
@@ -39,7 +41,7 @@ class VenSensorConfigRecord:
         payload: dict[str, object] = {
             "name": self.name,
             "targets": list(self.targets),
-            "utc_trigger_time": self.utc_trigger_time,
+            "utc_trigger_time": self.utc_trigger_time.isoformat() if self.utc_trigger_time is not None else "",
             "fetch_import_capacity_limits": self.fetch_import_capacity_limits,
             "fetch_export_capacity_limits": self.fetch_export_capacity_limits,
         }

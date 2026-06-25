@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, cast
 
 from flask import current_app
@@ -69,10 +69,9 @@ def _build_job_id(ven_id: int, config_name: str, run_at: datetime) -> str:
     return f"oadr3-ven-{ven_id}-{config_name}-fetch-events-{int(run_at.timestamp())}"
 
 
-def _next_daily_trigger_datetime(utc_trigger_time: str) -> datetime:
-    hour, minute, second = (int(part) for part in utc_trigger_time.split(":"))
+def _next_daily_trigger_datetime(utc_trigger_time: time) -> datetime:
     now_utc = datetime.now(UTC)
-    trigger = now_utc.replace(hour=hour, minute=minute, second=second, microsecond=0)
+    trigger = now_utc.replace(hour=utc_trigger_time.hour, minute=utc_trigger_time.minute, second=utc_trigger_time.second, microsecond=0)
     if trigger <= now_utc:
         trigger += timedelta(days=1)
     return trigger
@@ -201,14 +200,13 @@ class VenFetchJobScheduler:
         replace_existing: bool = True,
     ) -> Job | None:
         """Schedule or reschedule the daily fetch-events job for a sensor config."""
-        utc_trigger_time = sensor_config.utc_trigger_time.strip()
-        if not utc_trigger_time:
+        if sensor_config.utc_trigger_time is None:
             return None
 
         if replace_existing and sensor_config.fetch_events_job_id:
             _delete_job(sensor_config.fetch_events_job_id)
 
-        run_at = _next_daily_trigger_datetime(utc_trigger_time)
+        run_at = _next_daily_trigger_datetime(sensor_config.utc_trigger_time)
         job_id = _build_job_id(ven_client.id, sensor_config.name, run_at)
         queue = _fetch_events_queue()
 

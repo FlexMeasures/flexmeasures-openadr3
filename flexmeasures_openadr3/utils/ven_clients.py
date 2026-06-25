@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import time
 
 from flask import current_app
 from flexmeasures.data import db
@@ -10,7 +11,6 @@ from openadr3_client.oadr310._ven.client import VirtualEndNodeClient
 from openadr3_client.ven.http_factory import VirtualEndNodeHttpClientFactory
 from openadr3_client.version import OADRVersion
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from pydantic_core.core_schema import ValidationInfo
 
 from flexmeasures_openadr3.models.forms import (
     FormValidationErrors,
@@ -26,12 +26,6 @@ from flexmeasures_openadr3.models.storage import (
 )
 from flexmeasures_openadr3.utils.encryption import SecretsEncryptor
 from flexmeasures_openadr3.utils.sensor import VenAssetRepository, VenSensorRepository
-
-_TIME_COMPONENT_COUNT = 3
-_MAX_HOUR = 23
-_MAX_MINUTE = 59
-_MAX_SECOND = 59
-
 
 def _parse_csv_values(raw_value: str) -> list[str]:
     """Parse a comma-separated string into a list of trimmed, non-empty values."""
@@ -53,7 +47,7 @@ class VenSensorConfig:
 
     name: str
     targets: list[str] = field(default_factory=list)
-    utc_trigger_time: str = ""
+    utc_trigger_time: time | None = None
     fetch_import_capacity_limits: bool = False
     fetch_export_capacity_limits: bool = False
     fetch_events_job_id: str | None = None
@@ -376,7 +370,7 @@ class VenSensorConfigFormData(BaseModel):
 
     name: str
     targets: list[str] = Field(default_factory=list)
-    utc_trigger_time: str
+    utc_trigger_time: time
     fetch_import_capacity_limits: bool = False
     fetch_export_capacity_limits: bool = False
 
@@ -390,20 +384,6 @@ class VenSensorConfigFormData(BaseModel):
         if isinstance(value, tuple):
             return [item.strip() for item in value if item.strip()]
         return [item.strip() for item in value if item.strip()]
-
-    @field_validator("utc_trigger_time")
-    @classmethod
-    def _validate_utc_trigger_time(cls, value: str, _info: ValidationInfo) -> str:
-        parsed_value = value.strip()
-        time_parts = parsed_value.split(":")
-        if len(time_parts) != _TIME_COMPONENT_COUNT or not all(part.isdigit() for part in time_parts):
-            msg = "Must be in UTC format HH:MM:SS."
-            raise ValueError(msg)
-        hour, minute, second = (int(part) for part in time_parts)
-        if hour > _MAX_HOUR or minute > _MAX_MINUTE or second > _MAX_SECOND:
-            msg = "Must be in UTC format HH:MM:SS."
-            raise ValueError(msg)
-        return f"{hour:02d}:{minute:02d}:{second:02d}"
 
     @classmethod
     def from_post_values(cls, post_values: VenSensorConfigPostValues) -> VenSensorConfigFormData:
