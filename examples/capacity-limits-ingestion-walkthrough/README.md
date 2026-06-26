@@ -179,7 +179,7 @@ Fetched DR events for VEN 'demo-ven' … stored 192 beliefs.
 | Seed script cannot reach VTN | `docker compose ps` — is `openleadr-vtn` running? Wait ~30s after startup. |
 | OAuth errors in seed script | Keycloak at `http://localhost:8080` — realm imported? |
 | VEN client save fails | URLs must use Docker service names (`openleadr-vtn`, `keycloak`), not `localhost`. |
-| Fetch job never runs | `docker compose ps worker` — worker must be up on the `forecasting` queue. |
+| Fetch job never runs | `docker compose ps worker` — worker must be up on the `ingestion` queue. |
 | No beliefs after fetch | Re-run `seed_events.py`; event must exist on VTN before fetch. |
 | HTTP blocked to VTN | `ALLOW_INSECURE_HTTP_VTN=true` is set in `docker-compose.yml`. |
 

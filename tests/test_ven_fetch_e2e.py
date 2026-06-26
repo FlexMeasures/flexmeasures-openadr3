@@ -60,6 +60,7 @@ def _beliefs_for_sensor(db: SQLAlchemy, sensor_id: int) -> list[TimedBelief]:
 
 def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     app: Flask,
+    logged_in_prosumer: object,  # noqa: ARG001
     fresh_db: SQLAlchemy,
     ven_client: IntegrationTestVTNClient,
     vtn_capacity_limit_event_seed: ExistingEvent,

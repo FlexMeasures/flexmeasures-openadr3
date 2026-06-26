@@ -25,6 +25,7 @@ from flexmeasures_openadr3.utils.ven_clients import (
 
 def test_create_ven_client_persists_connection_attributes(
     fresh_db: SQLAlchemy,
+    logged_in_prosumer: object,  # noqa: ARG001
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:
@@ -46,6 +47,7 @@ def test_create_ven_client_persists_connection_attributes(
 
 def test_create_ven_client_encrypts_oauth_credentials_in_attributes(
     fresh_db: SQLAlchemy,
+    logged_in_prosumer: object,  # noqa: ARG001
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:
@@ -157,6 +159,7 @@ def test_delete_sensor_config_removes_schedule_from_attributes(
 
 
 def test_duplicate_ven_client_name_raises(
+    created_ven_client: VenClient,  # noqa: ARG001
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:

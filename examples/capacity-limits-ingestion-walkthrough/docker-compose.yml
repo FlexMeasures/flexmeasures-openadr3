@@ -166,7 +166,7 @@ services:
       - ./python:/walkthrough/python:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - flexmeasures jobs run-worker --name flexmeasures-worker --queue forecasting\|scheduling
+      - flexmeasures jobs run-worker --name flexmeasures-worker --queue ingestion
     networks:
       - oadr3-walkthrough
 

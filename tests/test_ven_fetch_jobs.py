@@ -33,6 +33,8 @@ def test_schedule_enqueues_job_in_forecasting_queue(
     config = reloaded.get_sensor_config("daily-poll")
     assert config is not None
 
+    assert FETCH_EVENTS_QUEUE_NAME in app.queues
+
     job = ven_fetch_job_scheduler.schedule(reloaded, config)
     fresh_db.session.commit()
 
@@ -83,7 +85,7 @@ def test_schedule_without_utc_trigger_time_returns_none(
     config = VenSensorConfig(
         name="no-trigger",
         targets=["t1"],
-        utc_trigger_time="",
+        utc_trigger_time=None,
         fetch_import_capacity_limits=True,
     )
     created_ven_client.sensor_configs.append(config)
@@ -107,6 +109,7 @@ def test_delete_removes_scheduled_job_from_queue(
 
     config = reloaded.get_sensor_config("daily-poll")
     assert config is not None
+    assert FETCH_EVENTS_QUEUE_NAME in app.queues
 
     job = ven_fetch_job_scheduler.schedule(reloaded, config)
     fresh_db.session.commit()
@@ -133,6 +136,7 @@ def test_delete_all_removes_jobs_for_every_schedule(
     """delete_all clears scheduled jobs for all polling schedules on a VEN client."""
     reloaded = ven_client_repository.find_by_id(created_ven_client_with_schedule.id)
     assert reloaded is not None
+    assert FETCH_EVENTS_QUEUE_NAME in app.queues
 
     for config in reloaded.sensor_configs:
         ven_fetch_job_scheduler.schedule(reloaded, config)
