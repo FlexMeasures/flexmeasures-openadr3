@@ -121,7 +121,7 @@ def sensor_configs_overview(ven_id: int) -> str:
             ven_name=ven_client.name,
             config_name=cfg.name,
             targets=tuple(cfg.targets),
-            utc_trigger_time=cfg.utc_trigger_time,
+            utc_trigger_time=cfg.utc_trigger_time.isoformat() if cfg.utc_trigger_time else "",
             fetch_import_capacity_limits=cfg.fetch_import_capacity_limits,
             fetch_export_capacity_limits=cfg.fetch_export_capacity_limits,
             import_sensor_id=cfg.import_sensor.id if cfg.import_sensor else None,

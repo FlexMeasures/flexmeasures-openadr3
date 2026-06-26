@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import time
+
 import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -85,7 +87,7 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     schedule_form = VenSensorConfigFormData(
         name="e2e-poll",
         targets=[],
-        utc_trigger_time="00:00:00",
+        utc_trigger_time=time.fromisoformat("00:00:00"),
         fetch_import_capacity_limits=True,
         fetch_export_capacity_limits=True,
     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -116,7 +117,7 @@ def sample_sensor_config_form_data() -> VenSensorConfigFormData:
     return VenSensorConfigFormData(
         name="daily-poll",
         targets=["target-a", "target-b"],
-        utc_trigger_time="02:30:00",
+        utc_trigger_time=time.fromisoformat("02:30:00"),
         fetch_import_capacity_limits=True,
         fetch_export_capacity_limits=True,
     )

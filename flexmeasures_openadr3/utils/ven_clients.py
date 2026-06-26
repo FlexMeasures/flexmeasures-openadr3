@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import time
+from datetime import time  # NOQA: TC003
 
 from flask import current_app
 from flexmeasures.data import db
@@ -26,6 +26,7 @@ from flexmeasures_openadr3.models.storage import (
 )
 from flexmeasures_openadr3.utils.encryption import SecretsEncryptor
 from flexmeasures_openadr3.utils.sensor import VenAssetRepository, VenSensorRepository
+
 
 def _parse_csv_values(raw_value: str) -> list[str]:
     """Parse a comma-separated string into a list of trimmed, non-empty values."""
