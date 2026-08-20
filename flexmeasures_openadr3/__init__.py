@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import warnings
 from dataclasses import dataclass
 from typing import TypedDict
@@ -107,7 +108,13 @@ def init_cron_scheduler(setup_state: BlueprintSetupState) -> None:
     app = setup_state.app
     cron_scheduler = CronScheduler(connection=app.redis_connection)
     app.rq_cron_scheduler = cron_scheduler  # type: ignore[attr-defined]
-    cron_scheduler.start()
+    # CronScheduler.start() is a blocking daemon loop (register birth, then loop
+    # forever enqueuing due jobs). Run it in the background so app creation
+    # doesn't hang forever. This relies on there being exactly one process
+    # (see docker-compose.yml server service --workers 1) since VenFetchJobScheduler
+    # registers/removes jobs by mutating this in-process CronScheduler instance
+    # directly from request handlers.
+    threading.Thread(target=cron_scheduler.start, daemon=True, name="rq-cron-scheduler").start()
 
     with app.app_context():
         repository = VenClientRepository()
