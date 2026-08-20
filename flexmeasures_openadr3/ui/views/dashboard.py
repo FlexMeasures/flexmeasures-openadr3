@@ -21,7 +21,7 @@ from flexmeasures_openadr3.utils.ven_clients import (
     validate_ven_client_form,
     validate_ven_sensor_config_form,
 )
-from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
+from flexmeasures_openadr3.utils.ven_jobs import notify_cron_resync
 
 _HOUR_MINUTE_COMPONENT_COUNT = 2
 _MAX_HOUR = 23
@@ -39,11 +39,6 @@ def _require_validated_data[T](data: T | None) -> T:
 def _build_repository() -> VenClientRepository:
     """Create a repository only when a request/app context is active."""
     return VenClientRepository()
-
-
-def _build_job_scheduler(repository: VenClientRepository) -> VenFetchJobScheduler:
-    """Create a scheduler bound to the app-level CronScheduler."""
-    return VenFetchJobScheduler(repository, cron_scheduler=current_app.rq_cron_scheduler)  # type: ignore[attr-defined]
 
 
 def _utc_trigger_time_from_request(raw: str) -> str:
@@ -230,14 +225,13 @@ def ven_client_update(ven_id: int) -> str | Response:
 def ven_client_delete(ven_id: int) -> Response:
     """Delete a VEN client and all its scheduled fetch jobs."""
     ven_client_repository = _build_repository()
-    job_scheduler = _build_job_scheduler(ven_client_repository)
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
         abort(404)
 
-    job_scheduler.delete_all(ven_client)
     ven_client_repository.delete(ven_client)
     db.session.commit()
+    notify_cron_resync(current_app.redis_connection)
     flash(f"VEN client '{ven_client.name}' deleted.")
     return redirect(url_for(".dashboard"))
 
@@ -269,7 +263,6 @@ def ven_client_sensor_config_new(ven_id: int) -> str:
 def ven_client_sensor_config_create(ven_id: int) -> str | Response:
     """Handle form submission for creating a polling schedule."""
     ven_client_repository = _build_repository()
-    job_scheduler = _build_job_scheduler(ven_client_repository)
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
         abort(404)
@@ -277,12 +270,12 @@ def ven_client_sensor_config_create(ven_id: int) -> str | Response:
     post_values = _sensor_config_post_values_from_request()
     validation = validate_ven_sensor_config_form(post_values, existing_configs=ven_client.sensor_configs)
     if validation.is_valid:
-        sensor_config = ven_client_repository.append_sensor_config(
+        ven_client_repository.append_sensor_config(
             ven_client,
             _require_validated_data(validation.data),
         )
-        job_scheduler.schedule(ven_client, sensor_config)
         db.session.commit()
+        notify_cron_resync(current_app.redis_connection)
         flash(f"Polling schedule added for VEN client '{ven_client.name}'.")
         return redirect(url_for(".dashboard"))
 
@@ -307,7 +300,6 @@ def ven_client_sensor_config_create(ven_id: int) -> str | Response:
 def ven_client_sensor_config_delete(ven_id: int, config_name: str) -> Response:
     """Delete a polling schedule from a VEN client."""
     ven_client_repository = _build_repository()
-    job_scheduler = _build_job_scheduler(ven_client_repository)
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
         abort(404)
@@ -316,9 +308,9 @@ def ven_client_sensor_config_delete(ven_id: int, config_name: str) -> Response:
     if sensor_config is None:
         abort(404)
 
-    job_scheduler.delete(sensor_config)
     ven_client_repository.delete_sensor_config(ven_client, config_name)
     db.session.commit()
+    notify_cron_resync(current_app.redis_connection)
     flash(f"Polling schedule '{config_name}' deleted.")
     return redirect(url_for(".sensor_configs_overview", ven_id=ven_id))
 
@@ -368,7 +360,6 @@ def ven_client_sensor_config_edit(ven_id: int, config_name: str) -> str:
 def ven_client_sensor_config_update(ven_id: int, config_name: str) -> str | Response:
     """Handle form submission for updating a polling schedule."""
     ven_client_repository = _build_repository()
-    job_scheduler = _build_job_scheduler(ven_client_repository)
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
         abort(404)
@@ -386,14 +377,13 @@ def ven_client_sensor_config_update(ven_id: int, config_name: str) -> str | Resp
         existing_config = ven_client.get_sensor_config(config_name)
         if existing_config is None:
             abort(404)
-        job_scheduler.delete(existing_config)
-        updated_config = ven_client_repository.update_sensor_config(
+        ven_client_repository.update_sensor_config(
             ven_client,
             config_name,
             _require_validated_data(validation.data),
         )
-        job_scheduler.schedule(ven_client, updated_config)
         db.session.commit()
+        notify_cron_resync(current_app.redis_connection)
         flash(f"Polling schedule updated for VEN client '{ven_client.name}'.")
         return redirect(url_for(".dashboard"))
 

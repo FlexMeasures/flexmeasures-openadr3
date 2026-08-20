@@ -58,7 +58,6 @@ services:
       - 5001:5000
     depends_on:
       - dev-db
-      - test-db  # use -e SQLALCHEMY_TEST_DATABASE_URI=... to exec pytest
       - queue-db
       - mailhog
     restart: on-failure
@@ -128,19 +127,39 @@ services:
         pip install --no-cache-dir -r /usr/var/flexmeasures-instance/requirements.txt
       fi
       flexmeasures jobs run-worker --name flexmeasures-worker --queue ingestion
-  test-db:
-    image: postgres
-    expose:
-      - 5432
-    ports:
-      - "5432:5432"
-    restart: always
+  cron-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - dev-db
+      - queue-db
+      - mailhog
+    restart: on-failure
     environment:
-      POSTGRES_DB: flexmeasures_test
-      POSTGRES_USER: flexmeasures_test
-      POSTGRES_PASSWORD: flexmeasures_test
+      SQLALCHEMY_DATABASE_URI: "postgresql://fm-dev-db-user:fm-dev-db-pass@dev-db:5432/fm-dev-db"
+      SECRET_KEY: notsecret
+      SECURITY_TOTP_SECRETS: '{"1": "something-secret"}'
+      FLEXMEASURES_ENV: development
+      FLEXMEASURES_REDIS_URL: queue-db
+      FLEXMEASURES_REDIS_PASSWORD: fm-redis-pass
+      FLEXMEASURES_PLUGINS: "flexmeasures_openadr3"
+      MAIL_SERVER: mailhog   # MailHog mail server
+      MAIL_PORT: 1025        # MailHog mail port
+      LOGGING_LEVEL: INFO
     volumes:
-      - ./ci/load-psql-extensions.sql:/docker-entrypoint-initdb.d/load-psql-extensions.sql
+      # a place for config and plugin code, and custom requirements.txt
+      - ./flexmeasures-instance/:/usr/var/flexmeasures-instance/:rw
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+    - |
+      if [ -f /usr/var/flexmeasures-instance/requirements.txt ]; then
+        pip install --no-cache-dir -r /usr/var/flexmeasures-instance/requirements.txt
+      fi
+      # Exactly one instance of this service may run: it's the sole process
+      # driving flexmeasures_openadr3's VEN fetch-events CronScheduler (see
+      # flexmeasures_openadr3/cli.py). Do not scale this service.
+      flexmeasures oadr3-run-cron-scheduler
 volumes:
   redis-cache:
     driver: local

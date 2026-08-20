@@ -13,6 +13,7 @@ from flask_login import login_user
 from flask_sqlalchemy import SQLAlchemy
 from flexmeasures.data.models.user import User
 from openadr3_client.oadr310.models.event.event import ExistingEvent
+from rq.cron import CronScheduler
 from testcontainers.core.network import Network
 from testcontainers.keycloak import KeycloakContainer
 
@@ -95,8 +96,8 @@ def ven_fetch_job_scheduler(
     app: Flask,
     ven_client_repository: VenClientRepository,
 ) -> VenFetchJobScheduler:
-    """RQ job scheduler backed by the app-level CronScheduler."""
-    return VenFetchJobScheduler(ven_client_repository, cron_scheduler=app.rq_cron_scheduler)  # type: ignore[attr-defined]
+    """RQ job scheduler backed by a fresh CronScheduler, as the dedicated cron-scheduler process builds one."""
+    return VenFetchJobScheduler(ven_client_repository, cron_scheduler=CronScheduler(connection=app.redis_connection))
 
 
 @pytest.fixture

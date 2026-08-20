@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from flask import current_app
 from flexmeasures.data import db  # type: ignore[import-untyped]
@@ -23,6 +23,8 @@ from flexmeasures_openadr3.utils.ven_clients import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from redis import Redis
+
 OPENADR_EVENT_SOURCE_NAME = "OpenADR 3 VTN"
 OPENADR_EVENT_SOURCE_TYPE = "gateway"
 FETCH_EVENTS_QUEUE_NAME = "ingestion"
@@ -30,6 +32,16 @@ SUPPORTED_DR_PAYLOAD_TYPES = (
     EventPayloadType.IMPORT_CAPACITY_LIMIT,
     EventPayloadType.EXPORT_CAPACITY_LIMIT,
 )
+
+# Published by web request handlers, consumed by the dedicated cron-scheduler
+# process, to signal that VEN client/sensor config state changed and the
+# in-process CronScheduler job list should be rebuilt from the database.
+VEN_CRON_RESYNC_CHANNEL = "flexmeasures-openadr3:cron-resync"
+
+
+def notify_cron_resync(redis_connection: Redis) -> None:
+    """Signal the dedicated cron-scheduler process to resync its job list."""
+    redis_connection.publish(VEN_CRON_RESYNC_CHANNEL, "resync")
 
 
 class OverlappingDemandResponseEventsError(ValueError):
@@ -172,13 +184,21 @@ class VenFetchJobScheduler:
 
     @property
     def _cron_scheduler(self) -> CronScheduler:
-        if self._cron is not None:
-            return self._cron
-        return cast("CronScheduler", current_app.rq_cron_scheduler)  # Flask app instance loses type information, so we cast it to the expected type.
+        if self._cron is None:
+            msg = "VenFetchJobScheduler was constructed without a cron_scheduler; scheduling operations are unavailable."
+            raise RuntimeError(msg)
+        return self._cron
 
     def get_cron_jobs(self) -> list[CronJob]:
         """Return all registered cron jobs."""
         return self._cron_scheduler.get_jobs()
+
+    def resync_all(self) -> None:
+        """Rebuild the full set of cron jobs from the current VEN client configuration."""
+        self._cron_scheduler._cron_jobs = []  # noqa: SLF001
+        for ven_client in self._repository.list_ven_clients():
+            for sensor_config in ven_client.sensor_configs:
+                self.schedule(ven_client, sensor_config, replace_existing=False)
 
     def schedule(
         self,

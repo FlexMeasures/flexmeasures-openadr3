@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import warnings
 from dataclasses import dataclass
 from typing import TypedDict
@@ -10,11 +9,8 @@ from flask.blueprints import BlueprintSetupState
 from importlib_metadata import PackageNotFoundError
 from importlib_metadata import version as pkg_version
 from packaging.version import Version
-from rq.cron import CronScheduler
-from sqlalchemy.exc import OperationalError, ProgrammingError
 
-from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
+from flexmeasures_openadr3.cli import oadr3_run_cron_scheduler
 
 from .utils.blueprints import ensure_bp_routes_are_loaded_fresh
 
@@ -103,31 +99,6 @@ def register_menu_item(setup_state: BlueprintSetupState) -> None:
 
 
 @flexmeasures_openadr3_ui_bp.record_once
-def init_cron_scheduler(setup_state: BlueprintSetupState) -> None:
-    """Create the app-level CronScheduler and re-register all VEN cron jobs."""
-    app = setup_state.app
-    cron_scheduler = CronScheduler(connection=app.redis_connection)
-    app.rq_cron_scheduler = cron_scheduler  # type: ignore[attr-defined]
-    # CronScheduler.start() is a blocking daemon loop (register birth, then loop
-    # forever enqueuing due jobs). Run it in the background so app creation
-    # doesn't hang forever. This relies on there being exactly one process
-    # (see docker-compose.yml server service --workers 1) since VenFetchJobScheduler
-    # registers/removes jobs by mutating this in-process CronScheduler instance
-    # directly from request handlers.
-    threading.Thread(target=cron_scheduler.start, daemon=True, name="rq-cron-scheduler").start()
-
-    with app.app_context():
-        repository = VenClientRepository()
-        scheduler = VenFetchJobScheduler(repository, cron_scheduler=cron_scheduler)
-        try:
-            ven_clients = repository.list_ven_clients()
-            for ven_client in ven_clients:
-                for config in ven_client.sensor_configs:
-                    scheduler.schedule(ven_client, config, replace_existing=False)
-        except (OperationalError, ProgrammingError):
-            app.logger.warning(
-                "flexmeasures-openadr3: could not load VEN clients during startup "
-                "(database tables may not exist yet — run migrations first). "
-                "Assuming this is a fresh instance of FM so no existing cron jobs are registered yet. Skipping..."
-            )
-            return
+def register_cli_commands(setup_state: BlueprintSetupState) -> None:
+    """Register the dedicated cron-scheduler CLI command on the FlexMeasures app."""
+    setup_state.app.cli.add_command(oadr3_run_cron_scheduler)
