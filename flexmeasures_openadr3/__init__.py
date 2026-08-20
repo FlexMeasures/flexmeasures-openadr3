@@ -9,6 +9,11 @@ from flask.blueprints import BlueprintSetupState
 from importlib_metadata import PackageNotFoundError
 from importlib_metadata import version as pkg_version
 from packaging.version import Version
+from rq.cron import CronScheduler
+from sqlalchemy.exc import OperationalError, ProgrammingError
+
+from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
+from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
 
 from .utils.blueprints import ensure_bp_routes_are_loaded_fresh
 
@@ -94,3 +99,28 @@ def register_menu_item(setup_state: BlueprintSetupState) -> None:
         **app.config.get("FLEXMEASURES_MENU_LISTED_VIEW_ICONS", {}),
         registration.view_key: registration.icon,
     }
+
+
+@flexmeasures_openadr3_ui_bp.record_once
+def init_cron_scheduler(setup_state: BlueprintSetupState) -> None:
+    """Create the app-level CronScheduler and re-register all VEN cron jobs."""
+    app = setup_state.app
+    cron_scheduler = CronScheduler(connection=app.redis_connection)
+    app.rq_cron_scheduler = cron_scheduler  # type: ignore[attr-defined]
+    cron_scheduler.start()
+
+    with app.app_context():
+        repository = VenClientRepository()
+        scheduler = VenFetchJobScheduler(repository, cron_scheduler=cron_scheduler)
+        try:
+            ven_clients = repository.list_ven_clients()
+            for ven_client in ven_clients:
+                for config in ven_client.sensor_configs:
+                    scheduler.schedule(ven_client, config, replace_existing=False)
+        except (OperationalError, ProgrammingError):
+            app.logger.warning(
+                "flexmeasures-openadr3: could not load VEN clients during startup "
+                "(database tables may not exist yet — run migrations first). "
+                "Assuming this is a fresh instance of FM so no existing cron jobs are registered yet. Skipping..."
+            )
+            return

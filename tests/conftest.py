@@ -92,10 +92,11 @@ def ven_client_repository() -> VenClientRepository:
 
 @pytest.fixture
 def ven_fetch_job_scheduler(
+    app: Flask,
     ven_client_repository: VenClientRepository,
 ) -> VenFetchJobScheduler:
-    """RQ job scheduler for daily fetch-events jobs."""
-    return VenFetchJobScheduler(ven_client_repository)
+    """RQ job scheduler backed by the app-level CronScheduler."""
+    return VenFetchJobScheduler(ven_client_repository, cron_scheduler=app.rq_cron_scheduler)  # type: ignore[attr-defined]
 
 
 @pytest.fixture

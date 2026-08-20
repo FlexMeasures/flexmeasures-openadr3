@@ -1,7 +1,7 @@
 import contextlib
 from typing import cast
 
-from flask import abort, flash, redirect, request, url_for
+from flask import abort, current_app, flash, redirect, request, url_for
 from flask_login import login_required
 from flexmeasures.data import db
 from flexmeasures.ui.utils.view_utils import render_flexmeasures_template
@@ -42,8 +42,8 @@ def _build_repository() -> VenClientRepository:
 
 
 def _build_job_scheduler(repository: VenClientRepository) -> VenFetchJobScheduler:
-    """Create a scheduler bound to the current request repository."""
-    return VenFetchJobScheduler(repository)
+    """Create a scheduler bound to the app-level CronScheduler."""
+    return VenFetchJobScheduler(repository, cron_scheduler=current_app.rq_cron_scheduler)  # type: ignore[attr-defined]
 
 
 def _utc_trigger_time_from_request(raw: str) -> str:
