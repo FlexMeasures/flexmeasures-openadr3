@@ -114,7 +114,7 @@
                 if (!importCheckbox || !exportCheckbox) return;
                 if (!importCheckbox.checked && !exportCheckbox.checked) {
                   event.preventDefault();
-                  alert("Select at least one limit type: import and/or export.");
+                  showToast("Select at least one limit type: import and/or export.", "error");
                 }
               });
             })();

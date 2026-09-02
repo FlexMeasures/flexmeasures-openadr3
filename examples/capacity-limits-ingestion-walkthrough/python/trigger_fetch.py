@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
 """
 Run the OpenADR fetch job immediately for a configured polling schedule.
 
 Mirrors the helper used in tests/test_ven_fetch_e2e.py (_run_fetch_job_immediately).
-Intended to run inside the FlexMeasures server container:
+Intended to run inside the FlexMeasures server container, reusing its uv-managed
+venv (/app/.venv) rather than installing dependencies of its own:
 
-    docker compose exec server python /walkthrough/python/trigger_fetch.py
+    docker compose exec server uv run --active --no-project /walkthrough/python/trigger_fetch.py
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from flexmeasures.app import create as create_flexmeasures_app
 from settings import POLLING_SCHEDULE_NAME, VEN_CLIENT_NAME
 
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
+from flexmeasures_openadr3.utils.ven_jobs import _execute_fetch_events
 
 
 def main() -> None:
@@ -39,7 +39,6 @@ def main() -> None:
 
     with app.app_context():
         repository = VenClientRepository()
-        scheduler = VenFetchJobScheduler(repository)
         ven_client = repository.find_by_name(args.ven_name)
         if ven_client is None:
             print(f"VEN client '{args.ven_name}' not found.", file=sys.stderr)
@@ -53,7 +52,7 @@ def main() -> None:
             )
             raise SystemExit(1)
 
-        scheduler._execute(ven_client.id, config.name)
+        _execute_fetch_events(ven_client.id, config.name)
         print(f"Fetch complete for VEN '{args.ven_name}' schedule '{args.config_name}'.")
 
 

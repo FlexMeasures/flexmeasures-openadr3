@@ -4,6 +4,21 @@ on: push
 
 
 jobs:
+  zizmor:
+    name: Run zizmor 🌈
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # Required for upload-sarif (used by zizmor-action) to upload SARIF files.
+      contents: read # Only needed for private repos. Needed to clone the repo.
+      actions: read # Only needed for private repos. Needed for upload-sarif to read workflow run info.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor 🌈
+        uses: zizmorcore/zizmor-action@6599ee8b7a49aef6a770f63d261d214911a7ce02 # v0.6.0
   check:
     runs-on: ubuntu-latest
     name: "Check (on Python3.11)"
@@ -16,7 +31,7 @@ jobs:
         with:
           version: "0.9.22"
           enable-cache: true
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v.7.0.1
       - uses: pre-commit/action@646c83fcd040023954eafda54b4db0192ce70507
 
   tests:

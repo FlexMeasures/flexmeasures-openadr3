@@ -20,6 +20,6 @@ VEN_CLIENT_NAME = "demo-ven"
 POLLING_SCHEDULE_NAME = "demo-poll"
 
 # FlexMeasures web UI
-FLEXMEASURES_URL = "http://localhost:5002"
+FLEXMEASURES_URL = "http://localhost:5001"
 FLEXMEASURES_LOGIN_EMAIL = "toy-user@flexmeasures.io"
 FLEXMEASURES_LOGIN_PASSWORD = "toy-password"

@@ -25,7 +25,7 @@ classifiers = [
 ]
 version = "0.1"
 dependencies = [
-    "flexmeasures>=1.0.0.dev0", # introduces the ingestion queue and platform secrets (asset.secrets); dev0 floor accepts the unreleased 1.0.0 pre-release builds used until 1.0.0 is officially published
+    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets); dev0 floor accepts the unreleased 1.0.0 pre-release builds used until 1.0.0 is officially published
     "openadr3-client==2.1.0",
 ]
 
@@ -49,7 +49,7 @@ dev-dependencies = [
     # Testing
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    # Linting    & formatting
+    # Linting & formatting
     "mypy>=1.0.0",
     "ruff>=0.15.11",
     # Pre-commit

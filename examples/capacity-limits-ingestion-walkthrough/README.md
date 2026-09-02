@@ -20,7 +20,7 @@ Hands-on example that mirrors the end-to-end test in `tests/test_ven_fetch_e2e.p
 ## Prerequisites
 
 - Docker and Docker Compose
-- Python 3.12+ (for the seed script on your host)
+- [uv](https://docs.astral.sh/uv/) (for running the Python scripts, on your host and inside the container)
 
 ---
 
@@ -46,15 +46,16 @@ Look for the gunicorn startup message, then open `http://localhost:5002` to veri
 The plugin has no CLI for VTN administration. Use the Business Logic OAuth client
 (`test-client-id`) to create a 24-hour event with 96 fifteen-minute intervals with an import and export capacity limit event from OpenADR 3.1 for this example scenario.
 
+`seed_events.py` is a [uv script](https://docs.astral.sh/uv/guides/scripts/) — its
+dependencies are declared inline, so `uv run` resolves and caches them on first use
+without any manual venv setup.
+
 ```bash
 cd python
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 
 export OAUTHLIB_INSECURE_TRANSPORT=1
 export OAUTHLIB_RELAX_TOKEN_SCOPE=1
-python seed_events.py
+uv run seed_events.py
 ```
 
 Expected output:
@@ -130,17 +131,21 @@ The schedule runs **once per day** at the configured UTC time. For this walkthro
 
 #### Option A — Trigger immediately (recommended)**
 
-Skip waiting for the daily schedule and run the fetch now:
+Skip waiting for the daily schedule and run the fetch now. `--active --no-project`
+tells `uv run` to reuse the container's own venv (`/app/.venv`, where `flexmeasures`
+and `flexmeasures_openadr3` are already installed) instead of resolving a fresh one:
 
 ```bash
-docker compose exec server python /walkthrough/python/trigger_fetch.py
+docker compose exec server uv run --active --no-project /walkthrough/python/trigger_fetch.py
 ```
 
 #### Option B — Wait for the scheduled job**
 
 Set **Daily trigger time** to a UTC time 2–3 minutes from now, then save. Ensure the
-`worker` container is running — it processes the `ingestion` queue where fetch jobs
-are enqueued.
+`cron-scheduler` container is running — it's the dedicated process that evaluates
+polling schedules and enqueues fetch jobs onto the `ingestion` queue at the
+configured trigger time. The `worker` container must also be running — it's what
+processes that queue.
 
 ---
 
@@ -179,7 +184,7 @@ Fetched DR events for VEN 'demo-ven' … stored 192 beliefs.
 | Seed script cannot reach VTN | `docker compose ps` — is `openleadr-vtn` running? Wait ~30s after startup. |
 | OAuth errors in seed script | Keycloak at `http://localhost:8080` — realm imported? |
 | VEN client save fails | URLs must use Docker service names (`openleadr-vtn`, `keycloak`), not `localhost`. |
-| Fetch job never runs | `docker compose ps worker` — worker must be up on the `ingestion` queue. |
+| Fetch job never runs | `docker compose ps` — both `cron-scheduler` (evaluates the schedule) and `worker` (processes the `ingestion` queue) must be up. |
 | No beliefs after fetch | Re-run `seed_events.py`; event must exist on VTN before fetch. |
 | HTTP blocked to VTN | `ALLOW_INSECURE_HTTP_VTN=true` is set in `docker-compose.yml`. |
 

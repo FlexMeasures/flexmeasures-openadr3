@@ -1,13 +1,4 @@
 # OpenADR 3 capacity-limits walkthrough stack.
-#
-# Mirrors the integration-test setup used in tests/test_ven_fetch_e2e.py:
-#   Keycloak (OAuth) + OpenLEADR-rs VTN + FlexMeasures with this plugin.
-#
-# Prerequisites (from the repository root):
-#   docker build -t flexmeasures-oadr3:latest .
-#
-# Then from this directory:
-#   docker compose up -d --build
 
 services:
   keycloak:
@@ -26,7 +17,7 @@ services:
       - oadr3-walkthrough
 
   vtn-db:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_USER: openadr
       POSTGRES_PASSWORD: openadr
@@ -40,7 +31,7 @@ services:
       retries: 10
 
   openleadr-vtn:
-    image: ghcr.io/openleadr/openleadr-rs:1779099254-6c5a5cc
+    image: ghcr.io/openleadr/openleadr-rs:v0.2.6
     platform: linux/amd64
     depends_on:
       vtn-db:
@@ -65,7 +56,7 @@ services:
       - oadr3-walkthrough
 
   fm-db:
-    image: postgres:17
+    image: postgres:18
     environment:
       POSTGRES_DB: fm-walkthrough-db
       POSTGRES_USER: fm-walkthrough-user
@@ -73,7 +64,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - fm-db-data:/var/lib/postgresql/data
+      - fm-db-data:/var/lib/postgresql
     networks:
       - oadr3-walkthrough
     healthcheck:
@@ -91,10 +82,10 @@ services:
       - oadr3-walkthrough
 
   server:
-    image: flexmeasures-oadr3:latest
-    # build:
-    #   context: ../..
-    #   dockerfile: Dockerfile
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    platform: linux/amd64
     ports:
       - "5002:5000"
     depends_on:
@@ -120,8 +111,12 @@ services:
       OAUTHLIB_RELAX_TOKEN_SCOPE: "1"
       LOGGING_LEVEL: INFO
     volumes:
-      - fm-data:/usr/var/flexmeasures-instance:rw
-      - fm-data:/app/instance:rw
+      # flexmeasures.cfg here sets FLEXMEASURES_SECRETS_ENCRYPTION_KEYS, which
+      # FlexMeasures does not read from an environment variable. It must be
+      # identical across server, worker, and cron-scheduler, so all three
+      # bind-mount this same host folder.
+      - ./fm-walkthrough-instance:/usr/var/flexmeasures-instance:rw
+      - ./fm-walkthrough-instance:/app/instance:rw
       - ./python:/walkthrough/python:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -136,10 +131,10 @@ services:
       - oadr3-walkthrough
 
   worker:
-    image: flexmeasures-oadr3:latest
-    # build:
-    #   context: ../..
-    #   dockerfile: Dockerfile
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    platform: linux/amd64
     depends_on:
       fm-db:
         condition: service_healthy
@@ -161,12 +156,49 @@ services:
       OAUTHLIB_RELAX_TOKEN_SCOPE: "1"
       LOGGING_LEVEL: INFO
     volumes:
-      - fm-worker-data:/usr/var/flexmeasures-instance:rw
-      - fm-worker-data:/app/instance:rw
+      - ./fm-walkthrough-instance:/usr/var/flexmeasures-instance:rw
+      - ./fm-walkthrough-instance:/app/instance:rw
       - ./python:/walkthrough/python:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - flexmeasures jobs run-worker --name flexmeasures-worker --queue ingestion
+    networks:
+      - oadr3-walkthrough
+
+  cron-scheduler:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    depends_on:
+      fm-db:
+        condition: service_healthy
+      queue-db:
+        condition: service_started
+      server:
+        condition: service_started
+    restart: on-failure
+    environment:
+      SQLALCHEMY_DATABASE_URI: postgresql://fm-walkthrough-user:fm-walkthrough-pass@fm-db:5432/fm-walkthrough-db
+      FLEXMEASURES_REDIS_URL: queue-db
+      FLEXMEASURES_REDIS_PASSWORD: fm-redis-pass
+      SECRET_KEY: notsecret
+      SECURITY_TOTP_SECRETS: '{"1": "something-secret"}'
+      FLEXMEASURES_ENV: development
+      FLEXMEASURES_PLUGINS: flexmeasures_openadr3
+      ALLOW_INSECURE_HTTP_VTN: "true"
+      OAUTHLIB_INSECURE_TRANSPORT: "1"
+      OAUTHLIB_RELAX_TOKEN_SCOPE: "1"
+      LOGGING_LEVEL: INFO
+    volumes:
+      - ./fm-walkthrough-instance:/usr/var/flexmeasures-instance:rw
+      - ./fm-walkthrough-instance:/app/instance:rw
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # Exactly one instance of this service may run: it's the sole process
+      # driving flexmeasures_openadr3's VEN fetch-events CronScheduler (see
+      # flexmeasures_openadr3/cli.py). Do not scale this service.
+      - flexmeasures oadr3-run-cron-scheduler
     networks:
       - oadr3-walkthrough
 
@@ -176,5 +208,3 @@ networks:
 
 volumes:
   fm-db-data:
-  fm-data:
-  fm-worker-data:

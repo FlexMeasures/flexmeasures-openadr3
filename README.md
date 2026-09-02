@@ -8,11 +8,11 @@ Requires FlexMeasures **≥ v1.0.0** and Python **≥ 3.12**.
 
 [OpenADR](https://www.openadr.org/) (Open Automated Demand Response) is an industry standard for exchanging demand-response signals between a grid operator or aggregator (**VTN — Virtual Top Node**) and flexible assets or sites (**VEN — Virtual End Node**). Events describe when and how much capacity is available or limited, typically as time-bounded intervals with numeric payloads.
 
-**OpenADR 3.x** modernises the protocol around REST APIs and JSON payloads (compared with the XML-centric OpenADR 2.0b profile). This plugin implements a **VEN client** using the [`openadr3-client`](https://pypi.org/project/openadr3-client/) Open-Source Python library and targets **OpenADR 3.1** VTNs.
+**OpenADR 3** modernises the protocol around REST APIs and JSON payloads (compared with the XML/SOAP OpenADR 2.0b profile). This plugin implements a **VEN client** using the [`openadr3-client`](https://pypi.org/project/openadr3-client/) Open-Source Python library and targets **OpenADR 3** VTNs.
 
 ### Related: OpenLEADR
 
-[OpenLEADR](https://lfenergy.org/projects/openleadr/) is another [LF Energy](https://lfenergy.org/) project. It provides open-source OpenADR implementations, including a **Rust-based OpenADR 3.1 VTN** ([openleadr-rs](https://github.com/OpenLEADR/openleadr-rs)). OpenLEADR plays the **VTN** role; this FlexMeasures plugin plays the **VEN** role and can consume events published by VTNs such as OpenLEADR.
+[OpenLEADR](https://lfenergy.org/projects/openleadr/) is another [LF Energy](https://lfenergy.org/) project. It provides open-source OpenADR implementations, including a **Rust-based OpenADR 3 VTN** ([openleadr-rs](https://github.com/OpenLEADR/openleadr-rs)). OpenLEADR plays the **VTN** role; this FlexMeasures plugin plays the **VEN** role and can consume events published by VTNs such as OpenLEADR.
 
 ## Overview
 
@@ -102,14 +102,8 @@ We use pre-commit to keep code quality up.
 Install necessary tools with:
 
 ```bash
-pip install pre-commit black flake8 mypy
+uv sync --dev
 pre-commit install
-```
-
-or:
-
-```bash
-make install-for-dev
 ```
 
 Try it:

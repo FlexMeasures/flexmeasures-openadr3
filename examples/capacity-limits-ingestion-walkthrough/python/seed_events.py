@@ -1,9 +1,18 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "openadr3-client>=2.0.4",
+# ]
+# ///
 """
 Seed a 24-hour IMPORT/EXPORT_CAPACITY_LIMIT event on the OpenLEADR-rs VTN.
 
 Uses the Business Logic OAuth client (test-client-id) — the same flow as the
 integration test fixture vtn_capacity_limit_event_seed in tests/conftest.py.
+
+Run with:
+    uv run seed_events.py
 """
 
 from __future__ import annotations

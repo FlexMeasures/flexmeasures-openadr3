@@ -13,11 +13,6 @@ repos:
     -   id: fix-byte-order-marker
     -   id: trailing-whitespace
     -   id: mixed-line-ending
--   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.9
-    hooks:
-        - id: ruff
-        - id: ruff-format
 - repo: local
   hooks:
     - id: mypy
