@@ -15,12 +15,8 @@ from flexmeasures_openadr3.utils.sensor import (
     IMPORT_CAPACITY_LIMIT_SENSOR_NAME,
     VenSensorRepository,
 )
-from flexmeasures_openadr3.utils.ven_clients import (
-    VenClient,
-    VenClientFormData,
-    VenClientRepository,
-    VenSensorConfigFormData,
-)
+from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
+from flexmeasures_openadr3.utils.ven_clients import VenClient, VenClientRepository
 
 
 def test_create_ven_client_persists_connection_attributes(

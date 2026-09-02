@@ -37,8 +37,11 @@ flexmeasures_openadr3_ui_bp: Blueprint = Blueprint(
     static_folder="ui/static",
     url_prefix="/flexmeasures-openadr3",
 )
-ensure_bp_routes_are_loaded_fresh("ui.views.dashboards")
+ensure_bp_routes_are_loaded_fresh("ui.views.dashboard")
 from flexmeasures_openadr3.ui.views import dashboard  # noqa: E402,F401
+
+ensure_bp_routes_are_loaded_fresh("ui.views.sensor_configs")
+from flexmeasures_openadr3.ui.views import sensor_configs  # noqa: E402,F401
 
 
 @dataclass(frozen=True, slots=True)

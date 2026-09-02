@@ -17,12 +17,8 @@ from rq.cron import CronScheduler
 from testcontainers.core.network import Network
 from testcontainers.keycloak import KeycloakContainer
 
-from flexmeasures_openadr3.utils.ven_clients import (
-    VenClient,
-    VenClientFormData,
-    VenClientRepository,
-    VenSensorConfigFormData,
-)
+from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
+from flexmeasures_openadr3.utils.ven_clients import VenClient, VenClientRepository
 from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
 from tests.test_container.integration_types import (
     IntegrationTestVTNClient,

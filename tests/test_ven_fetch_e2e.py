@@ -13,11 +13,8 @@ from openadr3_client.oadr310.models.event.event import ExistingEvent
 from openadr3_client.oadr310.models.event.event_payload import EventPayloadType
 from sqlalchemy import select
 
-from flexmeasures_openadr3.utils.ven_clients import (
-    VenClientFormData,
-    VenClientRepository,
-    VenSensorConfigFormData,
-)
+from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
+from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
 from flexmeasures_openadr3.utils.ven_jobs import (
     OPENADR_EVENT_SOURCE_NAME,
     OPENADR_EVENT_SOURCE_TYPE,
