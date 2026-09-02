@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TypeVar, cast
+from typing import cast
 
 type JsonScalar = int | str | None
 type JsonValue = JsonScalar | dict[str, "JsonValue"] | list["JsonValue"]
-PrunedValueT = TypeVar("PrunedValueT", bound=JsonValue | None)
 
 
 class RemoveMarker:
@@ -21,20 +19,7 @@ class RemoveMarker:
 REMOVE = RemoveMarker()
 
 
-@dataclass(frozen=True, slots=True)
-class PruneResult[PrunedValueT: JsonValue | None]:
-    """Result of pruning sensor references from a JSON subtree."""
-
-    value: PrunedValueT | RemoveMarker
-    changed: bool
-
-    @property
-    def should_remove(self) -> bool:
-        """Return whether the pruned value should be removed from its parent."""
-        return self.value is REMOVE
-
-
-def _prune_flex_config_sensor_refs(value: JsonValue, sensor_id: int) -> PruneResult[JsonValue]:  # noqa: C901
+def _prune_flex_config_sensor_refs(value: JsonValue, sensor_id: int) -> JsonValue | RemoveMarker:
     """
     Recursively remove sensor references from nested flex_model/flex_context JSON structures.
 
@@ -49,61 +34,39 @@ def _prune_flex_config_sensor_refs(value: JsonValue, sensor_id: int) -> PruneRes
         sensor_id: The ID of the sensor to remove references to.
 
     Returns:
-        A tuple (pruned_value, changed):
-        - pruned_value: The value with sensor references removed. Can be:
-            - `_REMOVE` (sentinel object): Remove this entire entry from parent
-            - A pruned dict/list/scalar: The value with refs removed
-        - changed (bool): True if any references were actually removed.
+        The value with sensor references removed. Can be:
+        - `REMOVE` (sentinel object): the entire entry should be removed from its parent
+        - A pruned dict/list/scalar: the value with refs removed
 
     Example:
         >>> value = {"soc-max": {"sensor": 42}, "limit": "10 kW"}
-        >>> pruned, did_change = _prune_flex_config_sensor_refs(value, sensor_id=42)
-        >>> pruned
+        >>> _prune_flex_config_sensor_refs(value, sensor_id=42)
         {'limit': '10 kW'}
-        >>> did_change
-        True
 
     """
     if isinstance(value, dict):
         if set(value.keys()) == {"sensor"} and value.get("sensor") == sensor_id:
-            return PruneResult(value=REMOVE, changed=True)
+            return REMOVE
 
-        changed = False
         pruned_dict: dict[str, JsonValue] = {}
         for key, nested in value.items():
             if key == "inflexible-device-sensors" and isinstance(nested, list):
-                new_list = [entry for entry in nested if entry != sensor_id]
-                if len(new_list) != len(nested):
-                    changed = True
-                pruned_dict[key] = new_list
+                pruned_dict[key] = [entry for entry in nested if entry != sensor_id]
                 continue
 
-            nested_result = _prune_flex_config_sensor_refs(nested, sensor_id)
-            changed = changed or nested_result.changed
-            if nested_result.should_remove:
-                changed = True
-                continue
-            if nested_result.value is not REMOVE:
-                pruned_dict[key] = cast("JsonValue", nested_result.value)
-        return PruneResult(value=pruned_dict, changed=changed)
+            nested_pruned = _prune_flex_config_sensor_refs(nested, sensor_id)
+            if nested_pruned is not REMOVE:
+                pruned_dict[key] = cast("JsonValue", nested_pruned)
+        return pruned_dict
 
     if isinstance(value, list):
-        changed = False
-        pruned_list: list[JsonValue] = []
-        for item in value:
-            item_result = _prune_flex_config_sensor_refs(item, sensor_id)
-            changed = changed or item_result.changed
-            if item_result.should_remove:
-                changed = True
-                continue
-            if item_result.value is not REMOVE:
-                pruned_list.append(cast("JsonValue", item_result.value))
-        return PruneResult(value=pruned_list, changed=changed)
+        pruned_items = (_prune_flex_config_sensor_refs(item, sensor_id) for item in value)
+        return [cast("JsonValue", item) for item in pruned_items if item is not REMOVE]
 
-    return PruneResult(value=value, changed=False)
+    return value
 
 
-def _prune_sensors_to_show_refs(value: list[JsonValue] | None, sensor_id: int) -> PruneResult[list[JsonValue] | None]:  # noqa: C901
+def _prune_sensors_to_show_refs(value: list[JsonValue] | None, sensor_id: int) -> list[JsonValue] | None:
     """
     Remove sensor references from sensors_to_show JSON list.
 
@@ -117,59 +80,45 @@ def _prune_sensors_to_show_refs(value: list[JsonValue] | None, sensor_id: int) -
         sensor_id: The ID of the sensor to remove references to.
 
     Returns:
-        A tuple (pruned_list, changed):
-        - pruned_list: The list with sensor references removed (or empty lists filtered out).
-                       Returns None/value unchanged if input is not a list.
-        - changed (bool): True if any references were actually removed.
+        The list with sensor references removed (and now-empty groups filtered out), or `value`
+        unchanged if it isn't a list.
 
     Example:
         >>> value = [42, [43, 42], {"sensor": 42}]
-        >>> pruned, did_change = _prune_sensors_to_show_refs(value, sensor_id=42)
-        >>> pruned
+        >>> _prune_sensors_to_show_refs(value, sensor_id=42)
         [[43]]
-        >>> did_change
-        True
 
     """
     if not isinstance(value, list):
-        return PruneResult(value=value, changed=False)
+        return value
 
-    changed = False
     cleaned: list[JsonValue] = []
-
     for entry in value:
         if isinstance(entry, int):
-            if entry == sensor_id:
-                changed = True
-                continue
-            cleaned.append(entry)
+            if entry != sensor_id:
+                cleaned.append(entry)
             continue
 
         if isinstance(entry, list):
             new_group = [sid for sid in entry if sid != sensor_id]
-            if len(new_group) != len(entry):
-                changed = True
             if new_group:
                 cleaned.append(new_group)
-            else:
-                changed = True
             continue
 
         if isinstance(entry, dict):
-            entry_result = _prune_sensors_to_show_entry(entry, sensor_id)
-            changed = changed or entry_result.changed
-            if entry_result.should_remove:
-                continue
-            if entry_result.value is not REMOVE:
-                cleaned.append(cast("JsonValue", entry_result.value))
+            pruned_entry = _prune_sensors_to_show_entry(entry, sensor_id)
+            if pruned_entry is not REMOVE:
+                cleaned.append(cast("JsonValue", pruned_entry))
             continue
 
         cleaned.append(entry)
 
-    return PruneResult(value=cleaned, changed=changed)
+    return cleaned
 
 
-def _prune_sensors_to_show_entry(entry: dict[str, JsonValue], sensor_id: int) -> PruneResult[dict[str, JsonValue]]:  # noqa: C901
+def _prune_sensors_to_show_entry(  # noqa: C901
+    entry: dict[str, JsonValue], sensor_id: int
+) -> dict[str, JsonValue] | RemoveMarker:
     """
     Remove sensor references from a single sensors_to_show dict entry.
 
@@ -183,66 +132,47 @@ def _prune_sensors_to_show_entry(entry: dict[str, JsonValue], sensor_id: int) ->
         sensor_id: The ID of the sensor to remove references to.
 
     Returns:
-        A tuple (pruned_entry, changed):
-        - pruned_entry: Can be:
-            - `_REMOVE`: Remove this entire entry from parent list
-            - Modified entry dict: The entry with refs removed
-        - changed (bool): True if any references were removed.
+        `REMOVE` if the entire entry should be removed from its parent list, otherwise the
+        (possibly modified) entry dict.
 
     Example:
         >>> entry = {"sensor": 42, "title": "Power"}
-        >>> pruned, did_change = _prune_sensors_to_show_entry(entry, sensor_id=42)
-        >>> pruned is _REMOVE
+        >>> _prune_sensors_to_show_entry(entry, sensor_id=42) is REMOVE
         True
 
     """
     if "sensor" in entry:
-        if entry.get("sensor") == sensor_id:
-            return PruneResult(value=REMOVE, changed=True)
-        return PruneResult(value=entry, changed=False)
+        return REMOVE if entry.get("sensor") == sensor_id else entry
 
     if "sensors" in entry and isinstance(entry["sensors"], list):
         new_sensors = [sid for sid in entry["sensors"] if sid != sensor_id]
-        changed = len(new_sensors) != len(entry["sensors"])
         if not new_sensors:
-            return PruneResult(value=REMOVE, changed=True)
-        copied = dict(entry)
-        copied["sensors"] = new_sensors
-        return PruneResult(value=copied, changed=changed)
+            return REMOVE
+        return {**entry, "sensors": new_sensors}
 
     if "plots" in entry and isinstance(entry["plots"], list):
-        changed = False
         new_plots: list[JsonValue] = []
         for plot in entry["plots"]:
             if not isinstance(plot, dict):
                 new_plots.append(plot)
                 continue
             if plot.get("sensor") == sensor_id:
-                changed = True
                 continue
             if "sensors" in plot and isinstance(plot["sensors"], list):
-                new_sensors = [sid for sid in plot["sensors"] if sid != sensor_id]
-                if len(new_sensors) != len(plot["sensors"]):
-                    changed = True
-                if not new_sensors:
-                    changed = True
-                    continue
-                copied_plot = dict(plot)
-                copied_plot["sensors"] = new_sensors
-                new_plots.append(copied_plot)
-            else:
-                new_plots.append(plot)
+                new_plot_sensors = [sid for sid in plot["sensors"] if sid != sensor_id]
+                if new_plot_sensors:
+                    new_plots.append({**plot, "sensors": new_plot_sensors})
+                continue
+            new_plots.append(plot)
 
         if not new_plots:
-            return PruneResult(value=REMOVE, changed=True)
-        copied = dict(entry)
-        copied["plots"] = new_plots
-        return PruneResult(value=copied, changed=changed)
+            return REMOVE
+        return {**entry, "plots": new_plots}
 
-    return PruneResult(value=entry, changed=False)
+    return entry
 
 
-def _prune_sensors_to_show_as_kpis_refs(value: list[JsonValue] | None, sensor_id: int) -> PruneResult[list[JsonValue] | None]:
+def _prune_sensors_to_show_as_kpis_refs(value: list[JsonValue] | None, sensor_id: int) -> list[JsonValue] | None:
     """
     Remove sensor references from sensors_to_show_as_kpis JSON list.
 
@@ -255,32 +185,20 @@ def _prune_sensors_to_show_as_kpis_refs(value: list[JsonValue] | None, sensor_id
         sensor_id: The ID of the sensor to remove references to.
 
     Returns:
-        A tuple (pruned_list, changed):
-        - pruned_list: The list with sensor references removed.
-                       Returns None/value unchanged if input is not a list.
-        - changed (bool): True if any references were actually removed.
+        The list with sensor references removed, or `value` unchanged if it isn't a list.
 
     Example:
         >>> value = [42, {"sensor": 42, "title": "Temp KPI", "function": "sum"}]
-        >>> pruned, did_change = _prune_sensors_to_show_as_kpis_refs(value, sensor_id=42)
-        >>> pruned
+        >>> _prune_sensors_to_show_as_kpis_refs(value, sensor_id=42)
         []
-        >>> did_change
-        True
 
     """
     if not isinstance(value, list):
-        return PruneResult(value=value, changed=False)
+        return value
 
-    changed = False
-    cleaned: list[JsonValue] = []
-    for entry in value:
-        if isinstance(entry, int) and entry == sensor_id:
-            changed = True
-            continue
-        if isinstance(entry, dict) and entry.get("sensor") == sensor_id:
-            changed = True
-            continue
-        cleaned.append(entry)
-
-    return PruneResult(value=cleaned, changed=changed)
+    return [
+        entry
+        for entry in value
+        if not (isinstance(entry, int) and entry == sensor_id)
+        and not (isinstance(entry, dict) and entry.get("sensor") == sensor_id)
+    ]

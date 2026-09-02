@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 OPENADR_EVENT_SOURCE_NAME = "OpenADR 3 VTN"
 OPENADR_EVENT_SOURCE_TYPE = "gateway"
 FETCH_EVENTS_QUEUE_NAME = "ingestion"
+# Bounds the whole job (DB query + VTN/OAuth HTTP calls + DB commit), since the
+# openadr3_client HTTP calls it makes have no timeout of their own. Without this,
+# an unresponsive VTN/OAuth endpoint pins a DB connection open indefinitely.
+FETCH_EVENTS_JOB_TIMEOUT_SECONDS = 120
 SUPPORTED_DR_PAYLOAD_TYPES = (
     EventPayloadType.IMPORT_CAPACITY_LIMIT,
     EventPayloadType.EXPORT_CAPACITY_LIMIT,
@@ -277,6 +281,7 @@ class VenFetchJobScheduler:
             cron=cron_string,
             kwargs={"ven_id": ven_client.id, "config_name": sensor_config.name},
             result_ttl=60 * 60 * 24 * 7,  # 7 days
+            job_timeout=FETCH_EVENTS_JOB_TIMEOUT_SECONDS,
         )
 
     def delete(self, sensor_config: VenSensorConfig) -> None:

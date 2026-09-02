@@ -12,6 +12,7 @@ from flexmeasures.data.models.generic_assets import GenericAsset, GenericAssetTy
 from flexmeasures.data.models.time_series import Sensor, TimedBelief
 from flexmeasures.utils.time_utils import get_timezone
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from flexmeasures_openadr3.utils.sensor_ref_pruning import (
     REMOVE,
@@ -44,16 +45,30 @@ class VenAssetRepository:
     """Handles persistence of VEN GenericAsset and GenericAssetType objects."""
 
     def get_or_create_asset_type(self) -> GenericAssetType:
-        """Return the OpenADR VEN asset type, creating it if needed."""
-        asset_type = db.session.execute(select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)).scalar_one_or_none()
+        """
+        Return the OpenADR VEN asset type, creating it if needed.
 
-        if asset_type is None:
-            asset_type = GenericAssetType(
-                name=VEN_ASSET_TYPE_NAME,
-                description=VEN_ASSET_TYPE_DESCRIPTION,
-            )
-            db.session.add(asset_type)
-            db.session.flush()
+        Commits immediately rather than relying on the caller to commit or roll
+        back: this is also called from long-lived processes (the cron-scheduler
+        CLI command and its resync thread) whose app context is never torn down,
+        so an uncommitted insert here would hold its unique-name lock forever and
+        block every other process trying to read-or-create the same row.
+        """
+        asset_type = db.session.execute(select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)).scalar_one_or_none()
+        if asset_type is not None:
+            return asset_type
+
+        asset_type = GenericAssetType(
+            name=VEN_ASSET_TYPE_NAME,
+            description=VEN_ASSET_TYPE_DESCRIPTION,
+        )
+        db.session.add(asset_type)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Lost the race to a concurrent creator; use the row it committed.
+            db.session.rollback()
+            asset_type = db.session.execute(select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)).scalar_one()
 
         return asset_type
 
@@ -152,45 +167,33 @@ class VenSensorRepository:
 
         changed_assets = 0
         for asset in candidates:
-            flex_model_result = _prune_flex_config_sensor_refs(asset.flex_model, sensor_id)
-            flex_context_result = _prune_flex_config_sensor_refs(asset.flex_context, sensor_id)
-            sensors_to_show_result = _prune_sensors_to_show_refs(asset.sensors_to_show, sensor_id)
-            sensors_to_show_as_kpis_result = _prune_sensors_to_show_as_kpis_refs(asset.sensors_to_show_as_kpis, sensor_id)
-
-            changed = any(
+            pruned_fields = (
+                ("flex-model", "flex_model", _prune_flex_config_sensor_refs(asset.flex_model, sensor_id)),
+                ("flex-context", "flex_context", _prune_flex_config_sensor_refs(asset.flex_context, sensor_id)),
+                ("sensors-to-show", "sensors_to_show", _prune_sensors_to_show_refs(asset.sensors_to_show, sensor_id)),
                 (
-                    flex_model_result.changed,
-                    flex_context_result.changed,
-                    sensors_to_show_result.changed,
-                    sensors_to_show_as_kpis_result.changed,
-                )
+                    "sensors-to-show-as-kpis",
+                    "sensors_to_show_as_kpis",
+                    _prune_sensors_to_show_as_kpis_refs(asset.sensors_to_show_as_kpis, sensor_id),
+                ),
             )
-            if not changed:
+            changed_fields = [
+                (field_name, attr, pruned)
+                for field_name, attr, pruned in pruned_fields
+                if pruned is REMOVE or pruned != getattr(asset, attr)
+            ]
+            if not changed_fields:
                 continue
 
-            changed_field_events = (
-                (flex_model_result.changed, "flex-model"),
-                (flex_context_result.changed, "flex-context"),
-                (sensors_to_show_result.changed, "sensors-to-show"),
-                (sensors_to_show_as_kpis_result.changed, "sensors-to-show-as-kpis"),
-            )
-            for field_changed, field_name in changed_field_events:
-                if not field_changed:
-                    continue
-                sensor_label = f"'{sensor_name}': {sensor_id}" if sensor_name else str(sensor_id)
+            sensor_label = f"'{sensor_name}': {sensor_id}" if sensor_name else str(sensor_id)
+            for field_name, attr, pruned in changed_fields:
                 AssetAuditLog.add_record(
                     asset,
                     f"Removed sensor reference {sensor_label} from {field_name} (because sensor has been deleted).",
                 )
+                if pruned is not REMOVE:
+                    setattr(asset, attr, pruned)
 
-            if flex_model_result.value is not REMOVE:
-                asset.flex_model = flex_model_result.value
-            if flex_context_result.value is not REMOVE:
-                asset.flex_context = flex_context_result.value
-            if sensors_to_show_result.value is not REMOVE:
-                asset.sensors_to_show = sensors_to_show_result.value
-            if sensors_to_show_as_kpis_result.value is not REMOVE:
-                asset.sensors_to_show_as_kpis = sensors_to_show_as_kpis_result.value
             db.session.add(asset)
             changed_assets += 1
 

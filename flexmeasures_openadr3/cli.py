@@ -5,6 +5,7 @@ import threading
 import click
 from flask import Flask, current_app
 from flask.cli import with_appcontext
+from flexmeasures.data import db
 from rq.cron import CronScheduler
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -15,11 +16,21 @@ _FALLBACK_RESYNC_INTERVAL_SECONDS = 5 * 60
 
 
 def _resync_or_warn(job_scheduler: VenFetchJobScheduler) -> None:
-    """Rebuild the cron job list, tolerating a not-yet-migrated database."""
+    """
+    Rebuild the cron job list, tolerating a not-yet-migrated database.
+
+    Always tears down the session afterwards: this runs inside app contexts
+    that live far longer than a normal request (the CLI command's own context,
+    and the resync-listener thread's per-iteration context), so nothing else
+    ever triggers Flask-SQLAlchemy's usual end-of-request session cleanup.
+    """
     try:
         job_scheduler.resync_all()
     except (OperationalError, ProgrammingError):
+        db.session.rollback()
         current_app.logger.warning("flexmeasures-openadr3: could not load VEN clients (database tables may not exist yet — run migrations first). Skipping this resync.")
+    finally:
+        db.session.remove()
 
 
 def _listen_for_resync(app: Flask, job_scheduler: VenFetchJobScheduler) -> None:
@@ -29,13 +40,13 @@ def _listen_for_resync(app: Flask, job_scheduler: VenFetchJobScheduler) -> None:
     Also resyncs on a periodic fallback interval, so a missed pub/sub message
     (e.g. during a scheduler restart) self-heals instead of silently drifting.
     """
-    with app.app_context():
-        pubsub = app.redis_connection.pubsub()
-        pubsub.subscribe(VEN_CRON_RESYNC_CHANNEL)
-        while True:
-            message = pubsub.get_message(timeout=_FALLBACK_RESYNC_INTERVAL_SECONDS)
-            if message is not None and message["type"] != "message":
-                continue
+    pubsub = app.redis_connection.pubsub()
+    pubsub.subscribe(VEN_CRON_RESYNC_CHANNEL)
+    while True:
+        message = pubsub.get_message(timeout=_FALLBACK_RESYNC_INTERVAL_SECONDS)
+        if message is not None and message["type"] != "message":
+            continue
+        with app.app_context():
             _resync_or_warn(job_scheduler)
 
 

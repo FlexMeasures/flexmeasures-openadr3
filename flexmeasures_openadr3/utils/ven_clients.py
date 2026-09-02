@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from datetime import time  # NOQA: TC003
 from typing import TYPE_CHECKING
@@ -25,6 +26,11 @@ if TYPE_CHECKING:
 
 OAUTH_CLIENT_ID_SECRET_PATH = "ven_client.oauth_client_id"
 OAUTH_CLIENT_SECRET_SECRET_PATH = "ven_client.oauth_client_secret"
+# openadr3_client exposes no timeout/session injection point on its VEN client
+# factory, so requests through it would otherwise block forever on an
+# unresponsive VTN. This does not cover the OAuth token fetch, which uses its
+# own requests_oauthlib session; that path relies on the RQ job_timeout instead.
+VTN_HTTP_TIMEOUT_SECONDS = 30
 
 
 class VenClientCredentialsMissingError(RuntimeError):
@@ -122,7 +128,7 @@ class VenClient:
             msg = f"VEN client '{self.name}' has no OAuth credentials configured."
             raise VenClientCredentialsMissingError(msg) from exc
 
-        return VirtualEndNodeHttpClientFactory.create_http_ven_client(
+        client = VirtualEndNodeHttpClientFactory.create_http_ven_client(
             vtn_base_url=self.vtn_url,
             client_id=oauth_client_id,
             client_secret=oauth_client_secret,
@@ -130,7 +136,12 @@ class VenClient:
             scopes=self.scopes,
             allow_insecure_http=True,
             version=OADRVersion.OADR_310,
-        )  # type: ignore[return-value]
+        )
+        client.events.session.request = functools.partial(  # type: ignore[attr-defined]
+            client.events.session.request,  # type: ignore[attr-defined]
+            timeout=VTN_HTTP_TIMEOUT_SECONDS,
+        )
+        return client  # type: ignore[return-value]
 
     def to_attribute_payload(self) -> VenClientAttributePayload:
         """Convert this client to the JSON payload stored on the asset."""

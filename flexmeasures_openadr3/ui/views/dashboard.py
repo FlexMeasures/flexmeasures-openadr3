@@ -36,14 +36,12 @@ def _build_repository() -> VenClientRepository:
 def dashboard() -> str:
     """Render the OpenADR 3 dashboard."""
     ven_client_repository = _build_repository()
-    active_events = tuple()
 
     return cast(
         "str",
         render_flexmeasures_template(
             "flexmeasures_oadr3_dashboard.html",
             ven_clients=ven_client_repository.list_ven_clients(),
-            active_events=active_events,
         ),
     )
 
