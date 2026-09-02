@@ -21,7 +21,7 @@ from flexmeasures_openadr3.utils.ven_clients import (
 from flexmeasures_openadr3.utils.ven_jobs import (
     OPENADR_EVENT_SOURCE_NAME,
     OPENADR_EVENT_SOURCE_TYPE,
-    VenFetchJobScheduler,
+    _execute_fetch_events,
 )
 from tests.test_container.integration_types import IntegrationTestVTNClient
 
@@ -40,16 +40,10 @@ def _build_ven_client_form_data(
     )
 
 
-def _run_fetch_job_immediately(
-    app: Flask,
-    ven_client_repository: VenClientRepository,
-    ven_id: int,
-    config_name: str,
-) -> None:
+def _run_fetch_job_immediately(app: Flask, ven_id: int, config_name: str) -> None:
     """Invoke the fetch-events worker logic synchronously (skip RQ schedule delay)."""
-    scheduler = VenFetchJobScheduler(ven_client_repository)
     with app.app_context():
-        scheduler._execute(ven_id, config_name)
+        _execute_fetch_events(ven_id, config_name)
 
 
 def _beliefs_for_sensor(db: SQLAlchemy, sensor_id: int) -> list[TimedBelief]:
@@ -102,7 +96,7 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     assert config.export_sensor is not None
 
     # --- Run fetch job immediately (do not wait for the daily RQ trigger) ---
-    _run_fetch_job_immediately(app, ven_client_repository, ven.id, config.name)
+    _run_fetch_job_immediately(app, ven.id, config.name)
 
     # --- Assert beliefs on import/export sensors ---
     import_beliefs = _beliefs_for_sensor(fresh_db, config.import_sensor.id)

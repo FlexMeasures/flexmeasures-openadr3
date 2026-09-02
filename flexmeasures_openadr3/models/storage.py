@@ -55,8 +55,6 @@ class VenClientAttributePayload:
     """VEN connection settings and polling schedules stored on a generic asset."""
 
     vtn_url: str = ""
-    oauth_client_id: str = ""
-    oauth_client_secret: str = ""
     oauth_token_url: str = ""
     scopes: tuple[str, ...] = ()
     sensor_configs: tuple[VenSensorConfigRecord, ...] = ()
@@ -87,8 +85,6 @@ class VenClientAttributePayload:
 
         return cls(
             vtn_url=str(raw_payload.get("vtn_url", "") or ""),
-            oauth_client_id=str(raw_payload.get("oauth_client_id", "") or ""),
-            oauth_client_secret=str(raw_payload.get("oauth_client_secret", "") or ""),
             oauth_token_url=str(raw_payload.get("oauth_token_url", "") or ""),
             scopes=scopes,
             sensor_configs=sensor_configs,
@@ -98,8 +94,6 @@ class VenClientAttributePayload:
         """Serialize the payload for storage in asset attributes."""
         return {
             "vtn_url": self.vtn_url,
-            "oauth_client_id": self.oauth_client_id,
-            "oauth_client_secret": self.oauth_client_secret,
             "oauth_token_url": self.oauth_token_url,
             "scopes": list(self.scopes),
             "sensor_configs": [record.to_json() for record in self.sensor_configs],

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 from flask_sqlalchemy import SQLAlchemy
+from flexmeasures.utils.secrets_utils import get_secret
 
 from flexmeasures_openadr3.models.storage import (
     VEN_CLIENT_ATTRIBUTE_KEY,
     VenClientAttributePayload,
 )
-from flexmeasures_openadr3.utils.encryption import SecretsEncryptor
 from flexmeasures_openadr3.utils.sensor import (
     EXPORT_CAPACITY_LIMIT_SENSOR_NAME,
     IMPORT_CAPACITY_LIMIT_SENSOR_NAME,
@@ -45,23 +45,24 @@ def test_create_ven_client_persists_connection_attributes(
     assert list(payload.scopes) == sample_ven_client_form_data.scopes
 
 
-def test_create_ven_client_encrypts_oauth_credentials_in_attributes(
+def test_create_ven_client_stores_oauth_credentials_as_platform_secrets(
     fresh_db: SQLAlchemy,
     logged_in_prosumer: object,  # noqa: ARG001
     ven_client_repository: VenClientRepository,
     sample_ven_client_form_data: VenClientFormData,
 ) -> None:
-    """OAuth client id and secret are encrypted in the asset JSON attributes."""
+    """OAuth client id and secret are stored via FlexMeasures platform secrets, not in attributes."""
     ven_client = ven_client_repository.create(sample_ven_client_form_data)
     fresh_db.session.commit()
 
     raw = ven_client.asset.attributes[VEN_CLIENT_ATTRIBUTE_KEY]
-    assert raw["oauth_client_id"] != sample_ven_client_form_data.oauth_client_id
-    assert raw["oauth_client_secret"] != sample_ven_client_form_data.oauth_client_secret
+    assert "oauth_client_id" not in raw
+    assert "oauth_client_secret" not in raw
 
-    encryptor = SecretsEncryptor.from_current_app()
-    assert encryptor.decrypt(raw["oauth_client_id"]) == sample_ven_client_form_data.oauth_client_id
-    assert encryptor.decrypt(raw["oauth_client_secret"]) == sample_ven_client_form_data.oauth_client_secret
+    assert get_secret(ven_client.asset.secrets, "ven_client.oauth_client_id") == sample_ven_client_form_data.oauth_client_id
+    assert get_secret(ven_client.asset.secrets, "ven_client.oauth_client_secret") == sample_ven_client_form_data.oauth_client_secret
+    assert ven_client.oauth_client_id_is_set
+    assert ven_client.oauth_client_secret_is_set
 
 
 def test_append_sensor_config_persists_polling_schedule(
@@ -135,6 +136,33 @@ def test_update_ven_client_persists_changed_fields(
     assert reloaded is not None
     assert reloaded.vtn_url == updated_form.vtn_url
     assert reloaded.scopes == updated_form.scopes
+    assert get_secret(reloaded.asset.secrets, "ven_client.oauth_client_id") == "new-client-id"
+    assert get_secret(reloaded.asset.secrets, "ven_client.oauth_client_secret") == "new-client-secret"
+
+
+def test_update_ven_client_with_blank_credentials_keeps_existing_secrets(
+    fresh_db: SQLAlchemy,
+    created_ven_client: VenClient,
+    ven_client_repository: VenClientRepository,
+) -> None:
+    """Submitting blank OAuth credentials on update leaves the stored secrets unchanged."""
+    updated_form = VenClientFormData(
+        name=created_ven_client.name,
+        vtn_url="https://vtn.example/v2",
+        oauth_client_id="",
+        oauth_client_secret="",
+        oauth_token_url="https://vtn.example/oauth/v2",
+        scopes=["openid"],
+    )
+
+    ven_client_repository.update(created_ven_client, updated_form)
+    fresh_db.session.commit()
+
+    reloaded = ven_client_repository.find_by_name(created_ven_client.name)
+    assert reloaded is not None
+    assert reloaded.vtn_url == updated_form.vtn_url
+    assert get_secret(reloaded.asset.secrets, "ven_client.oauth_client_id") == "test-client-id"
+    assert get_secret(reloaded.asset.secrets, "ven_client.oauth_client_secret") == "test-client-secret"
 
 
 def test_delete_sensor_config_removes_schedule_from_attributes(

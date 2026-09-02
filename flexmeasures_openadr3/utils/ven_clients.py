@@ -7,6 +7,7 @@ from flask import current_app
 from flexmeasures.data import db
 from flexmeasures.data.models.generic_assets import GenericAsset
 from flexmeasures.data.models.time_series import Sensor
+from flexmeasures.utils.secrets_utils import get_secret, get_secret_paths, store_asset_secret
 from openadr3_client.oadr310._ven.client import VirtualEndNodeClient
 from openadr3_client.ven.http_factory import VirtualEndNodeHttpClientFactory
 from openadr3_client.version import OADRVersion
@@ -24,8 +25,14 @@ from flexmeasures_openadr3.models.storage import (
     VenClientAttributePayload,
     VenSensorConfigRecord,
 )
-from flexmeasures_openadr3.utils.encryption import SecretsEncryptor
 from flexmeasures_openadr3.utils.sensor import VenAssetRepository, VenSensorRepository
+
+OAUTH_CLIENT_ID_SECRET_PATH = "ven_client.oauth_client_id"
+OAUTH_CLIENT_SECRET_SECRET_PATH = "ven_client.oauth_client_secret"
+
+
+class VenClientCredentialsMissingError(RuntimeError):
+    """Raised when a VEN client has no OAuth credentials configured."""
 
 
 def _parse_csv_values(raw_value: str) -> list[str]:
@@ -90,11 +97,11 @@ class VenClient:
 
     asset: GenericAsset = field(repr=False)
     vtn_url: str = ""
-    oauth_client_id: str = ""
-    oauth_client_secret: str = field(default="", repr=False)
     oauth_token_url: str = ""
     scopes: list[str] = field(default_factory=list)
     sensor_configs: list[VenSensorConfig] = field(default_factory=list)
+    oauth_client_id_is_set: bool = field(default=False, repr=False)
+    oauth_client_secret_is_set: bool = field(default=False, repr=False)
 
     @property
     def id(self) -> int:
@@ -117,17 +124,20 @@ class VenClient:
 
     def create_http_client(self) -> VirtualEndNodeClient:
         """Build an authenticated OpenADR HTTP client for this VEN."""
-        secrets_encryptor = SecretsEncryptor.from_current_app()
-        decrypted_oauth_client_id = secrets_encryptor.decrypt(self.oauth_client_id)
-        decrypted_oauth_client_secret = secrets_encryptor.decrypt(self.oauth_client_secret)
+        try:
+            oauth_client_id = get_secret(self.asset.secrets, OAUTH_CLIENT_ID_SECRET_PATH)
+            oauth_client_secret = get_secret(self.asset.secrets, OAUTH_CLIENT_SECRET_SECRET_PATH)
+        except KeyError as exc:
+            msg = f"VEN client '{self.name}' has no OAuth credentials configured."
+            raise VenClientCredentialsMissingError(msg) from exc
 
         return VirtualEndNodeHttpClientFactory.create_http_ven_client(
             vtn_base_url=self.vtn_url,
-            client_id=decrypted_oauth_client_id,
-            client_secret=decrypted_oauth_client_secret,
+            client_id=oauth_client_id,
+            client_secret=oauth_client_secret,
             token_url=self.oauth_token_url,
             scopes=self.scopes,
-            allow_insecure_http=current_app.config.get("ALLOW_INSECURE_HTTP_VTN", "false") == "true",
+            allow_insecure_http=True,
             version=OADRVersion.OADR_310,
         )  # type: ignore[return-value]
 
@@ -135,8 +145,6 @@ class VenClient:
         """Convert this client to the JSON payload stored on the asset."""
         return VenClientAttributePayload(
             vtn_url=self.vtn_url,
-            oauth_client_id=self.oauth_client_id,
-            oauth_client_secret=self.oauth_client_secret,
             oauth_token_url=self.oauth_token_url,
             scopes=tuple(self.scopes),
             sensor_configs=tuple(cfg.to_record() for cfg in self.sensor_configs),
@@ -154,7 +162,6 @@ class VenClientRepository:
     def __init__(self) -> None:
         self._assets = VenAssetRepository()
         self._sensors = VenSensorRepository()
-        self._secrets_encryptor = SecretsEncryptor.from_current_app()
 
     def _build_sensor_configs(self, asset: GenericAsset, records: tuple[VenSensorConfigRecord, ...]) -> list[VenSensorConfig]:
         configs: list[VenSensorConfig] = []
@@ -168,43 +175,22 @@ class VenClientRepository:
 
     def _build_ven_client(self, asset: GenericAsset) -> VenClient:
         payload = VenClientAttributePayload.from_asset_attributes(asset.attributes)
+        secret_paths = set(get_secret_paths(asset.secrets or {}))
 
         return VenClient(
             asset=asset,
             vtn_url=payload.vtn_url,
-            oauth_client_id=payload.oauth_client_id,
-            oauth_client_secret=payload.oauth_client_secret,
             oauth_token_url=payload.oauth_token_url,
             scopes=list(payload.scopes),
             sensor_configs=self._build_sensor_configs(asset, payload.sensor_configs),
+            oauth_client_id_is_set=OAUTH_CLIENT_ID_SECRET_PATH in secret_paths,
+            oauth_client_secret_is_set=OAUTH_CLIENT_SECRET_SECRET_PATH in secret_paths,
         )
 
-    def _persist_payload(self, ven_client: VenClient, *, encrypt_oauth_credentials: bool = False) -> None:
-        """
-        Write VEN-specific data back to the asset's attributes column.
-
-        OAuth client id and secret are stored encrypted. Pass *encrypt_oauth_credentials*
-        True when *ven_client* carries plaintext from a form; pass False when those
-        fields are unchanged ciphertext loaded from the database (e.g. sensor config
-        or job id updates).
-        """
+    def _persist_payload(self, ven_client: VenClient) -> None:
+        """Write VEN-specific, non-secret data back to the asset's attributes column."""
         attributes = dict(ven_client.asset.attributes or {})
-        if encrypt_oauth_credentials:
-            stored_oauth_client_id = self._secrets_encryptor.encrypt(ven_client.oauth_client_id)
-            stored_oauth_client_secret = self._secrets_encryptor.encrypt(ven_client.oauth_client_secret)
-        else:
-            stored_oauth_client_id = ven_client.oauth_client_id
-            stored_oauth_client_secret = ven_client.oauth_client_secret
-
-        payload = ven_client.to_attribute_payload()
-        attributes[VEN_CLIENT_ATTRIBUTE_KEY] = VenClientAttributePayload(
-            vtn_url=payload.vtn_url,
-            oauth_client_id=stored_oauth_client_id,
-            oauth_client_secret=stored_oauth_client_secret,
-            oauth_token_url=payload.oauth_token_url,
-            scopes=payload.scopes,
-            sensor_configs=payload.sensor_configs,
-        ).to_json()
+        attributes[VEN_CLIENT_ATTRIBUTE_KEY] = ven_client.to_attribute_payload().to_json()
         ven_client.asset.attributes = attributes
 
     def list_ven_clients(self) -> list[VenClient]:
@@ -227,24 +213,26 @@ class VenClientRepository:
         ven_client = VenClient(
             asset=asset,
             vtn_url=form_data.vtn_url,
-            oauth_client_id=form_data.oauth_client_id,
-            oauth_client_secret=form_data.oauth_client_secret,
             oauth_token_url=form_data.oauth_token_url,
             scopes=form_data.scopes,
         )
-        self._persist_payload(ven_client, encrypt_oauth_credentials=True)
+        store_asset_secret(asset, OAUTH_CLIENT_ID_SECRET_PATH, form_data.oauth_client_id)
+        store_asset_secret(asset, OAUTH_CLIENT_SECRET_SECRET_PATH, form_data.oauth_client_secret)
+        self._persist_payload(ven_client)
         db.session.flush()
         return self._build_ven_client(asset)
 
     def update(self, ven_client: VenClient, form_data: VenClientFormData) -> VenClient:
-        """Update an existing VEN client from validated form data."""
+        """Update an existing VEN client from validated form data. A blank credential keeps the existing one."""
         ven_client.name = form_data.name
         ven_client.vtn_url = form_data.vtn_url
-        ven_client.oauth_client_id = form_data.oauth_client_id
-        ven_client.oauth_client_secret = form_data.oauth_client_secret
         ven_client.oauth_token_url = form_data.oauth_token_url
         ven_client.scopes = form_data.scopes
-        self._persist_payload(ven_client, encrypt_oauth_credentials=True)
+        if form_data.oauth_client_id:
+            store_asset_secret(ven_client.asset, OAUTH_CLIENT_ID_SECRET_PATH, form_data.oauth_client_id)
+        if form_data.oauth_client_secret:
+            store_asset_secret(ven_client.asset, OAUTH_CLIENT_SECRET_SECRET_PATH, form_data.oauth_client_secret)
+        self._persist_payload(ven_client)
         db.session.flush()
         return ven_client
 
@@ -416,8 +404,8 @@ def build_ven_client_form_values(
     return VenClientFormValues(
         name=ven_client.name,
         vtn_url=ven_client.vtn_url,
-        oauth_client_id=ven_client.oauth_client_id,
-        oauth_client_secret=ven_client.oauth_client_secret,
+        oauth_client_id="",
+        oauth_client_secret="",
         oauth_token_url=ven_client.oauth_token_url,
         scopes=", ".join(ven_client.scopes),
     )
@@ -468,6 +456,11 @@ def validate_ven_client_form(
         if ven_client_data is None:
             msg = "Validated VEN client form data missing despite successful validation."
             raise RuntimeError(msg)
+        if current_name is None:
+            if not ven_client_data.oauth_client_id:
+                errors.add("oauth_client_id", "OAuth client ID is required.")
+            if not ven_client_data.oauth_client_secret:
+                errors.add("oauth_client_secret", "OAuth client secret is required.")
         existing = ven_client_repository.find_by_name(ven_client_data.name)
         if existing and ven_client_data.name != current_name:
             errors.add("name", "A VEN client with this name already exists.")

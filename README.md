@@ -2,7 +2,7 @@
 
 FlexMeasures plugin that connects to an **OpenADR 3 Virtual Top Node (VTN)** as a **Virtual End Node (VEN)** and ingests demand-response capacity signals into FlexMeasures time-series sensors.
 
-Requires FlexMeasures **≥ v0.33.0** and Python **≥ 3.12**.
+Requires FlexMeasures **≥ v1.0.0** and Python **≥ 3.12**.
 
 ## What is OpenADR?
 
@@ -89,7 +89,7 @@ flowchart LR
    - The filesystem path to this repository, e.g. `/path/to/flexmeasures-plugin-oadr3`, or
    - The installed package name: `flexmeasures_openadr3` (after `pip install` / `uv pip install`).
 
-2. Optionally set `OPENADR_SECRETS_ENCRYPTION_KEY`, if this environment variable is set, this key is used to encrypt secrets (such as oauth credentials) at rest in asset attributes. Optional, if not set, the global flexmeasures `SECRET_KEY` environment variable is used to encrypt secrets..
+2. Set FlexMeasures' `FLEXMEASURES_SECRETS_ENCRYPTION_KEYS` (required, FlexMeasures v1.0+): a JSON object mapping key IDs to master key values, e.g. `{"1": "<random 32-byte url-safe token>"}`. This plugin uses FlexMeasures' native platform-secrets feature to encrypt VEN OAuth credentials at rest on the VEN's asset, and this key material must be identical across every process (`server`, any `worker`, and the `cron-scheduler`), exactly like `SECRET_KEY`. Unlike most FlexMeasures settings, this one is **not** read from an environment variable — set it in `flexmeasures.cfg` (in your FlexMeasures instance folder) instead, e.g. `FLEXMEASURES_SECRETS_ENCRYPTION_KEYS = {"1": "<random 32-byte url-safe token>"}`.
 
 3. Ensure an RQ worker is running on the queue used for fetch jobs (currently the `ingestion` queue), this is the default behaviour when using the FlexMeasures CLI run-worker when running FlexMeasures v0.33.0 or higher.
 

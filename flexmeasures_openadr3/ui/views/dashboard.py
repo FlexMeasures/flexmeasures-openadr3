@@ -1,4 +1,3 @@
-import contextlib
 from typing import cast
 
 from flask import abort, current_app, flash, redirect, request, url_for
@@ -10,8 +9,6 @@ from werkzeug.wrappers import Response
 from flexmeasures_openadr3 import flexmeasures_openadr3_ui_bp
 from flexmeasures_openadr3.models.forms import FormValidationErrors, VenSensorConfigFormValues, VenSensorConfigPostValues
 from flexmeasures_openadr3.models.views import VenSensorConfigOverview
-from flexmeasures_openadr3.utils.encryption import SecretsDecryptionError, SecretsEncryptor
-from flexmeasures_openadr3.utils.events import ACTIVE_OPENADR_EVENTS, SUPPORTED_SIGNAL_NAMES
 from flexmeasures_openadr3.utils.ven_clients import (
     VEN_CLIENT_FORM_FIELDS,
     VenClient,
@@ -69,27 +66,13 @@ def _sensor_config_post_values_from_request() -> VenSensorConfigPostValues:
     )
 
 
-def _decrypt_ven_client_credentials_for_form(ven_client: VenClient) -> VenClient:
-    """
-    Decrypt VEN credentials for UI rendering.
-
-    If credentials are already plaintext (legacy records), keep them unchanged.
-    """
-    secrets_encryptor = SecretsEncryptor.from_current_app()
-    with contextlib.suppress(SecretsDecryptionError):
-        ven_client.oauth_client_id = secrets_encryptor.decrypt(ven_client.oauth_client_id)
-    with contextlib.suppress(SecretsDecryptionError):
-        ven_client.oauth_client_secret = secrets_encryptor.decrypt(ven_client.oauth_client_secret)
-    return ven_client
-
-
 @flexmeasures_openadr3_ui_bp.route("/")
 @flexmeasures_openadr3_ui_bp.route("/dashboard")
 @login_required
 def dashboard() -> str:
     """Render the OpenADR 3 dashboard."""
     ven_client_repository = _build_repository()
-    active_events = tuple(event for event in ACTIVE_OPENADR_EVENTS if all(pd.payload_type in SUPPORTED_SIGNAL_NAMES for pd in event.payload_descriptors or ()))
+    active_events = tuple()
 
     return cast(
         "str",
@@ -175,7 +158,6 @@ def ven_client_detail(ven_id: int) -> str:
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
         abort(404)
-    ven_client = _decrypt_ven_client_credentials_for_form(ven_client)
 
     return cast(
         "str",
@@ -184,6 +166,8 @@ def ven_client_detail(ven_id: int) -> str:
             ven_client=ven_client,
             form_values=build_ven_client_form_values(ven_client),
             form_errors=FormValidationErrors(),
+            oauth_client_id_is_set=ven_client.oauth_client_id_is_set,
+            oauth_client_secret_is_set=ven_client.oauth_client_secret_is_set,
         ),
     )
 
@@ -211,6 +195,8 @@ def ven_client_update(ven_id: int) -> str | Response:
                 ven_client=ven_client,
                 form_values=field_values,
                 form_errors=validation.errors,
+                oauth_client_id_is_set=ven_client.oauth_client_id_is_set,
+                oauth_client_secret_is_set=ven_client.oauth_client_secret_is_set,
             ),
         )
 

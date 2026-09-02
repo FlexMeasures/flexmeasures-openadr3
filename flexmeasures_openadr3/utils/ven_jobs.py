@@ -126,6 +126,53 @@ def _validate_no_overlapping_events(events: list[ExistingEvent]) -> None:
                 raise OverlappingDemandResponseEventsError(msg)
 
 
+def _execute_fetch_events(ven_id: int, config_name: str) -> None:
+    """
+    Fetch events for a sensor config and store the resulting beliefs.
+
+    Registered as the rq job function, so it must not be a bound method of
+    VenFetchJobScheduler: pickling a bound method also pickles its `self`,
+    which would include the CronScheduler (and its Redis connection's
+    thread locks) and blow up job serialization.
+    """
+    repository = VenClientRepository()
+    ven_client = repository.find_by_id(ven_id)
+    if ven_client is None:
+        current_app.logger.warning("Stopping fetch-events job: VEN id '%s' no longer exists.", ven_id)
+        return
+
+    sensor_config = ven_client.get_sensor_config(config_name)
+    if sensor_config is None:
+        current_app.logger.warning(
+            "Stopping fetch-events job: config '%s' no longer exists on VEN '%s' (%s).",
+            config_name,
+            ven_client.name,
+            ven_id,
+        )
+        return
+
+    sensor_mapping = PayloadTypeSensorMapping.from_sensor_config(sensor_config)
+    if not sensor_mapping:
+        current_app.logger.warning(
+            "No sensors configured for VEN '%s' config '%s', skipping.",
+            ven_client.name,
+            sensor_config.name,
+        )
+        return
+
+    events = _fetch_events(ven_client, sensor_config.targets)
+    _validate_no_overlapping_events(events)
+    stored_beliefs = _store_event_payloads(events, sensor_mapping)
+    current_app.logger.info(
+        "Fetched DR events for VEN '%s' (%s) config '%s', stored %s beliefs.",
+        ven_client.name,
+        ven_id,
+        config_name,
+        stored_beliefs,
+    )
+    db.session.commit()
+
+
 def _fetch_events(ven_client: VenClient, targets: list[str]) -> list[ExistingEvent]:
     client = ven_client.create_http_client()
 
@@ -225,7 +272,7 @@ class VenFetchJobScheduler:
         )
 
         return self._cron_scheduler.register(
-            self._execute,
+            _execute_fetch_events,
             queue_name=FETCH_EVENTS_QUEUE_NAME,
             cron=cron_string,
             kwargs={"ven_id": ven_client.id, "config_name": sensor_config.name},
@@ -244,41 +291,3 @@ class VenFetchJobScheduler:
     def _remove_cron_job(self, config_name: str) -> None:
         cron = self._cron_scheduler
         cron._cron_jobs = [j for j in cron._cron_jobs if j.kwargs.get("config_name") != config_name]  # noqa: SLF001
-
-    def _execute(self, ven_id: int, config_name: str) -> None:
-        """Fetch events for a sensor config and store the resulting beliefs."""
-        ven_client = self._repository.find_by_id(ven_id)
-        if ven_client is None:
-            current_app.logger.warning("Stopping fetch-events job: VEN id '%s' no longer exists.", ven_id)
-            return
-
-        sensor_config = ven_client.get_sensor_config(config_name)
-        if sensor_config is None:
-            current_app.logger.warning(
-                "Stopping fetch-events job: config '%s' no longer exists on VEN '%s' (%s).",
-                config_name,
-                ven_client.name,
-                ven_id,
-            )
-            return
-
-        sensor_mapping = PayloadTypeSensorMapping.from_sensor_config(sensor_config)
-        if not sensor_mapping:
-            current_app.logger.warning(
-                "No sensors configured for VEN '%s' config '%s', skipping.",
-                ven_client.name,
-                sensor_config.name,
-            )
-            return
-
-        events = _fetch_events(ven_client, sensor_config.targets)
-        _validate_no_overlapping_events(events)
-        stored_beliefs = _store_event_payloads(events, sensor_mapping)
-        current_app.logger.info(
-            "Fetched DR events for VEN '%s' (%s) config '%s', stored %s beliefs.",
-            ven_client.name,
-            ven_id,
-            config_name,
-            stored_beliefs,
-        )
-        db.session.commit()

@@ -86,6 +86,7 @@ flexmeasures.log
 
 docker-compose-data
 ci
-flexmeasures-instance
+flexmeasures-instance/*
+!flexmeasures-instance/flexmeasures.cfg
 
 .cursor

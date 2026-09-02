@@ -78,7 +78,7 @@
                     </span>
                   </span>
                 </label>
-                <input id="oauth_client_secret" name="oauth_client_secret" type="text" class="form-control{% if form_errors.oauth_client_secret %} is-invalid{% endif %}" value="{{ form_values.oauth_client_secret }}" required>
+                <input id="oauth_client_secret" name="oauth_client_secret" type="password" autocomplete="new-password" class="form-control{% if form_errors.oauth_client_secret %} is-invalid{% endif %}" value="{{ form_values.oauth_client_secret }}" required>
                 {% if form_errors.oauth_client_secret %}
                 <div class="invalid-feedback">{{ form_errors.oauth_client_secret }}</div>
                 {% endif %}

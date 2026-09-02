@@ -43,7 +43,7 @@ def app(
         env="testing",
         plugins=["flexmeasures_openadr3"],
     )
-    test_app.config["OPENADR_SECRETS_ENCRYPTION_KEY"] = "test-openadr-secrets-key"
+    test_app.config["FLEXMEASURES_SECRETS_ENCRYPTION_KEYS"] = {"1": "test-openadr-secrets-key"}
     test_app.config["ALLOW_INSECURE_HTTP_VTN"] = "true"
     test_app.config["SERVER_NAME"] = "localhost"
     test_app.config["PREFERRED_URL_SCHEME"] = "http"
