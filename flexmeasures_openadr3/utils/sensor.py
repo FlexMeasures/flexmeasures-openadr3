@@ -177,11 +177,7 @@ class VenSensorRepository:
                     _prune_sensors_to_show_as_kpis_refs(asset.sensors_to_show_as_kpis, sensor_id),
                 ),
             )
-            changed_fields = [
-                (field_name, attr, pruned)
-                for field_name, attr, pruned in pruned_fields
-                if pruned is REMOVE or pruned != getattr(asset, attr)
-            ]
+            changed_fields = [(field_name, attr, pruned) for field_name, attr, pruned in pruned_fields if pruned is REMOVE or pruned != getattr(asset, attr)]
             if not changed_fields:
                 continue
 

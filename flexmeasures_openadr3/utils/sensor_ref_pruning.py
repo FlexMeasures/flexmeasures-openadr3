@@ -196,9 +196,4 @@ def _prune_sensors_to_show_as_kpis_refs(value: list[JsonValue] | None, sensor_id
     if not isinstance(value, list):
         return value
 
-    return [
-        entry
-        for entry in value
-        if not (isinstance(entry, int) and entry == sensor_id)
-        and not (isinstance(entry, dict) and entry.get("sensor") == sensor_id)
-    ]
+    return [entry for entry in value if not (isinstance(entry, int) and entry == sensor_id) and not (isinstance(entry, dict) and entry.get("sensor") == sensor_id)]

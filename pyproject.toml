@@ -118,6 +118,7 @@ ignore = [
     "D107", # Allow undocumented __init__
     "TC001", # Move to type checking block (does not play nice with pydantic models)
     "TC002", # Move to type checking block (does not play nice with pydantic models)
+    "CPY001",
 ]
 
 # Ignores S101 ("Use of 'assert' detected") for the tests.

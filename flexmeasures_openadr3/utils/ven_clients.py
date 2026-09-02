@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from datetime import time  # NOQA: TC003
 from typing import TYPE_CHECKING
 
-from flask import current_app
 from flexmeasures.data import db
 from flexmeasures.data.models.generic_assets import GenericAsset
 from flexmeasures.data.models.time_series import Sensor
@@ -24,8 +23,8 @@ from flexmeasures_openadr3.utils.sensor import VenAssetRepository, VenSensorRepo
 if TYPE_CHECKING:
     from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
 
-OAUTH_CLIENT_ID_SECRET_PATH = "ven_client.oauth_client_id"
-OAUTH_CLIENT_SECRET_SECRET_PATH = "ven_client.oauth_client_secret"
+OAUTH_CLIENT_ID_SECRET_PATH = "ven_client.oauth_client_id"  # noqa: S105
+OAUTH_CLIENT_SECRET_SECRET_PATH = "ven_client.oauth_client_secret"  # noqa: S105
 # openadr3_client exposes no timeout/session injection point on its VEN client
 # factory, so requests through it would otherwise block forever on an
 # unresponsive VTN. This does not cover the OAuth token fetch, which uses its
