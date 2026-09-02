@@ -44,6 +44,10 @@ include = [
 
 # UV-specific configuration
 [tool.uv]
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
 dev-dependencies = [
     # Inherits from [project.optional-dependencies.dev]
     # Testing
