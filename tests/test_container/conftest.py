@@ -67,11 +67,10 @@ def integration_test_docker_network() -> Iterator[Network]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _allow_http_oauth_for_test_keycloak() -> Iterator[None]:
+def _allow_http_oauth_for_test_keycloak() -> None:
     """Keycloak testcontainer serves HTTP; oauthlib requires this in non-production tests."""
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
     os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
-    yield
 
 
 @pytest.fixture(scope="session")
