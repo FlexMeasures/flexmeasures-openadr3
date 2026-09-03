@@ -22,6 +22,8 @@ repos:
       language: system
       types: [python]
       stages: [pre-commit]
+      pass_filenames: false
+      require_serial: true
 - repo: local
   hooks:
     - id: ruff-check
