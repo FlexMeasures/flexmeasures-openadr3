@@ -23,7 +23,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
-version = "0.1"
+version = "1.0"
 dependencies = [
     "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets); dev0 floor accepts the unreleased 1.0.0 pre-release builds used until 1.0.0 is officially published
     "openadr3-client==2.1.0",
@@ -48,7 +48,9 @@ environments = [
     "sys_platform == 'darwin'",
     "sys_platform == 'linux'",
 ]
-dev-dependencies = [
+
+[dependency-groups]
+dev = [
     # Inherits from [project.optional-dependencies.dev]
     # Testing
     "pytest>=7.0.0",
