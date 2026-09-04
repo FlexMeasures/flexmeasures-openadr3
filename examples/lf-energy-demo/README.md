@@ -8,10 +8,11 @@ landing on a sensor:
 
 1. Start an OpenADR 3.1 VTN (OpenLEADR-rs) with Keycloak OAuth, plus a FlexMeasures instance
 2. Seed a demo campus / EVSE hub / office asset hierarchy in FlexMeasures
-3. Seed capacity-limit events on the VTN via Python (Business Logic client)
-4. Configure a VEN client and polling schedule in the FlexMeasures UI
-5. Fetch events, then wire the resulting capacity-limit sensors into the site as a scheduling constraint
-6. Inspect beliefs on the linked sensors
+3. Seed a week of prices, forecasts and typical-usage profiles onto that hierarchy's sensors
+4. Seed capacity-limit events on the VTN via Python (Business Logic client)
+5. Configure a VEN client and polling schedule in the FlexMeasures UI
+6. Fetch events, then wire the resulting capacity-limit sensors into the site as a scheduling constraint
+7. Inspect beliefs on the linked sensors
 
 ## Stack
 
@@ -52,7 +53,7 @@ Look for the gunicorn startup message, then open `http://localhost:5002` to veri
 `seed_assets.py` builds a realistic three-level demo site — a campus with an EVSE charging
 hub and a grid-friendly office — as real `GenericAsset` and `Sensor` rows, so the capacity
 limits fetched later in this walkthrough have a site to constrain. Like `trigger_fetch.py`
-(Step 6), it runs inside the FlexMeasures container against the ORM directly, reusing the
+(Step 7), it runs inside the FlexMeasures container against the ORM directly, reusing the
 container's own uv-managed venv, so it needs no API token:
 
 ```bash
@@ -62,7 +63,7 @@ docker compose exec server uv run --active --no-project /walkthrough/flexmeasure
 This needs the `Walkthrough Toy Account`, which the `server` container's entrypoint creates
 on first boot (Step 1) — if it isn't there yet, wait for the gunicorn startup message and
 try again. The script is idempotent: assets and sensors are looked up by name before being
-created, so it's safe to re-run any time, including once more in Step 7.
+created, so it's safe to re-run any time, including once more in Step 8.
 
 It builds:
 
@@ -89,7 +90,53 @@ See [`flexmeasures/README.md`](flexmeasures/README.md) for more detail on the hi
 
 ---
 
-## Step 3 — Seed capacity-limit events on the VTN
+## Step 3 — Seed a week of prices, forecasts and usage profiles
+
+The hierarchy from Step 2 has sensors but no data, so its charts are empty and a schedule
+would have nothing to plan around — not even a price to optimise against.
+`seed_forecasts.py` fills the coming seven days with synthetic but plausible data, and runs
+in the container just like Step 2:
+
+```bash
+docker compose exec server uv run --active --no-project /walkthrough/flexmeasures/seed_forecasts.py
+```
+
+It writes three different kinds of belief, from two clearly-labelled data sources, because
+they do not mean the same thing:
+
+| Sensors | Data source | Meaning |
+|---------|-------------|---------|
+| `day-ahead prices`, `demo-office-baseload/power`, `demo-office-pv/power` | `LF Energy demo forecaster` (`forecaster`) | Real forecasts. The prices are what the scheduler optimises against; the other two are the site's `inflexible-consumption` and `inflexible-production`, which it reads as given and plans around. |
+| `demo-evse-01…08/power`, `demo-office-heat-pump/power` | `LF Energy demo profiles` (`demo script`) | Reference profiles: what the site would do if nobody optimised it. These devices are dispatched by the scheduler, which writes its own beliefs over the same window from its own source. |
+| `demo-evse-01…08/state of charge`, `demo-office-heat-pump/state of charge` | `LF Energy demo profiles` (`demo script`) | One current reading per storage device, so `soc-at-start` resolves and a schedule can be triggered straight away. |
+
+The shapes are what you would expect of an office campus on the Dutch market: prices trough
+overnight, peak as the country wakes up, dip in the middle of the day while the sun is on
+the roofs and peak again in the early evening; the background load sits on a night floor of
+servers and standby, climbs over the hour before opening, dips over lunch and falls away
+after 18:00, with a much lower weekend; the PV follows a daylight bell curve whose height
+varies from day to day with cloud cover; the heat pump pre-heats the building in the small
+hours and only tops up while it is occupied; and the charge points fill up over the office
+day, most of them plugging in around 08:00 and unplugging around 17:00, with the occasional
+shorter stay for an early bird or a late worker.
+
+The price curve is written to the public `day-ahead prices` sensor on FlexMeasures' own
+`NL transmission zone` asset, which is what `demo-campus`'s flex-context already points at.
+It is also the one thing the scheduler refuses to run without: with an empty price sensor it
+stops at `Prices unknown for planning window` before it looks at anything else.
+
+The values are deterministic — each profile is drawn from a generator seeded on the sensor
+and the local calendar day — so a re-run merges the same rows back over themselves instead
+of producing a different week. Re-run it whenever the week has moved on, or pass
+`--days` to seed a shorter or longer horizon.
+
+The aggregate `power` sensors of `demo-campus`, `demo-evse-hub` and `demo-office` are left
+empty on purpose: those are the scheduler's output, and a synthetic aggregate there would
+simply disagree with the schedule once you trigger one.
+
+---
+
+## Step 4 — Seed capacity-limit events on the VTN
 
 The plugin has no CLI for VTN administration. Use the Business Logic OAuth client
 (`test-client-id`) to create a 24-hour event with 96 fifteen-minute intervals with an import and export capacity limit event from OpenADR 3.1 for this example scenario.
@@ -101,8 +148,6 @@ without any manual venv setup.
 ```bash
 cd python
 
-export OAUTHLIB_INSECURE_TRANSPORT=1
-export OAUTHLIB_RELAX_TOKEN_SCOPE=1
 uv run seed_events.py
 ```
 
@@ -119,7 +164,7 @@ The event starts **one hour from seed time** and spans 24 hours. Re-run
 
 ---
 
-## Step 4 — Log in to FlexMeasures
+## Step 5 — Log in to FlexMeasures
 
 Open `http://localhost:5002` and sign in with the toy account created by Docker:
 
@@ -134,7 +179,7 @@ Open **OpenADR 3 Configuration** in the main menu, or go directly to:
 
 ---
 
-## Step 5 — Create a VEN client
+## Step 6 — Create a VEN client
 
 Click **Add new VEN client** and fill in the form.
 
@@ -156,7 +201,7 @@ These credentials come from `keycloak/realm.json`, this file is human readable a
 
 ---
 
-## Step 6 — Add a polling schedule
+## Step 7 — Add a polling schedule
 
 On the dashboard, open **demo-ven** → **Add schedule** (or **Polling schedules** → **Add schedule**).
 
@@ -197,7 +242,7 @@ processes that queue.
 
 ---
 
-## Step 7 — Wire the OpenADR capacity limits into the site
+## Step 8 — Wire the OpenADR capacity limits into the site
 
 Now that `demo-ven`'s `demo-poll` schedule exists and has created its import/export
 capacity-limit sensors, re-run the asset-seeding script from Step 2:
@@ -222,7 +267,7 @@ this step.
 
 ---
 
-## Step 8 — Inspect sensor beliefs
+## Step 9 — Inspect sensor beliefs
 
 After the fetch completes:
 
@@ -249,9 +294,11 @@ Fetched DR events for VEN 'demo-ven' … stored 192 beliefs.
 (192 = 96 import + 96 export intervals stored across both sensors.)
 
 You can also open `demo-campus` in the FlexMeasures UI: its dashboard now plots the
-connection capacity alongside the wired OpenADR sensors from Step 7. From here, triggering a
-schedule on `demo-campus` will optimise the whole hierarchy against the fetched capacity
-limits — see the troubleshooting entry below about state-of-charge before you do.
+connection capacity alongside the wired OpenADR sensors from Step 8, over the week of data
+seeded in Step 3. From here, triggering a schedule on `demo-campus` will optimise the whole
+hierarchy against the fetched capacity limits: the forecasts from Step 3 tell the scheduler
+what the office will draw and produce, and the state-of-charge readings from that same step
+tell it where each battery and thermal buffer starts.
 
 ---
 
@@ -266,8 +313,11 @@ limits — see the troubleshooting entry below about state-of-charge before you 
 | No beliefs after fetch | Re-run `seed_events.py`; event must exist on VTN before fetch. |
 | HTTP blocked to VTN | `ALLOW_INSECURE_HTTP_VTN=true` is set in `docker-compose.yml`. |
 | `seed_assets.py` fails with "No account named …" | The `Walkthrough Toy Account` is created by the `server` container's entrypoint on first boot; wait for `docker compose logs -f server` to show the gunicorn startup message, then re-run. |
-| `seed_assets.py` reports OpenADR wiring as `not wired` | Expected until the VEN client and polling schedule exist (Steps 5-6); re-run it once they do (Step 7). |
-| Scheduler fails with "No recent state-of-charge value found for sensor …" | Each storage-like device (the EVSEs and the heat pump) needs a recent belief on its `state of charge` sensor before you trigger a schedule; record one manually, or pass `soc-at-start` in the scheduling request. |
+| `seed_assets.py` reports OpenADR wiring as `not wired` | Expected until the VEN client and polling schedule exist (Steps 6-7); re-run it once they do (Step 8). |
+| `seed_forecasts.py` fails with "No asset named …" | It seeds data onto the hierarchy from Step 2; run `seed_assets.py` first. |
+| Scheduler fails with "Prices unknown for planning window" | The `day-ahead prices` sensor is empty over the schedule window; run `seed_forecasts.py` (Step 3), or re-run it if the seeded week has run out. |
+| Scheduler fails with "No recent state-of-charge value found for sensor …" | Each storage-like device (the EVSEs and the heat pump) needs a recent belief on its `state of charge` sensor before you trigger a schedule. `seed_forecasts.py` (Step 3) records one per device at the quarter hour it runs in; if that was hours ago, re-run it, record a value manually, or pass `soc-at-start` in the scheduling request. |
+| Charts are empty, or a schedule assumes zero load | Run `seed_forecasts.py` (Step 3), and re-run it once the seeded week has run out. |
 
 ## Reference values
 

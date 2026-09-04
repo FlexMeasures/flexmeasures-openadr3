@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from flexmeasures.app import create as create_flexmeasures_app
 from flexmeasures.data import db
@@ -40,10 +40,13 @@ from hierarchy import (
     CAMPUS_NAME,
     CAMPUS_POWER_CAPACITY,
     CONTRACT_RESOLUTION,
+    ENERGY_UNIT,
     EVSE_HUB_NAME,
     EVSE_HUB_POWER_CAPACITY,
     EVSE_SPECS,
     FLEXMEASURES_URL,
+    GRID_CONNECTION_CAPACITY_SENSOR_NAME,
+    INDOOR_TEMPERATURE_SENSOR_NAME,
     OFFICE_BASELOAD_NAME,
     OFFICE_HEAT_PUMP_CHARGING_EFFICIENCY,
     OFFICE_HEAT_PUMP_COP,
@@ -58,11 +61,17 @@ from hierarchy import (
     OFFICE_PV_PEAK_POWER,
     POLLING_SCHEDULE_NAME,
     POWER_RESOLUTION,
+    POWER_SENSOR_NAME,
+    POWER_UNIT,
+    PRICE_RESOLUTION,
     PRICE_SENSOR_NAME,
+    PRICE_UNIT,
     SITE_LATITUDE,
     SITE_LONGITUDE,
     SITE_TIMEZONE,
     SOC_RESOLUTION,
+    SOC_SENSOR_NAME,
+    TEMPERATURE_UNIT,
     VEN_CLIENT_NAME,
     EvseSpec,
 )
@@ -72,15 +81,8 @@ from timely_beliefs.sensors.func_store.knowledge_horizons import x_days_ago_at_y
 
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
 
-POWER_UNIT = "kW"
-ENERGY_UNIT = "kWh"
-TEMPERATURE_UNIT = "°C"
-
-# Sensor names are reused across assets, so an asset page reads the same everywhere.
-POWER_SENSOR_NAME = "power"
-SOC_SENSOR_NAME = "state of charge"
-GRID_CONNECTION_CAPACITY_SENSOR_NAME = "grid connection capacity"
-INDOOR_TEMPERATURE_SENSOR_NAME = "indoor temperature"
+if TYPE_CHECKING:
+    from datetime import timedelta
 
 
 @dataclass
@@ -138,9 +140,9 @@ def get_or_create_day_ahead_price_sensor() -> Sensor:
         Sensor,
         name=PRICE_SENSOR_NAME,
         generic_asset=nl_zone,
-        unit="EUR/kWh",
+        unit=PRICE_UNIT,
         timezone=SITE_TIMEZONE,
-        event_resolution=timedelta(minutes=60),
+        event_resolution=PRICE_RESOLUTION,
         knowledge_horizon=(
             x_days_ago_at_y_oclock,
             {"x": 1, "y": 12, "z": "Europe/Paris"},
@@ -541,7 +543,7 @@ def find_openadr_capacity_sensors(report: SeedReport) -> dict[str, Sensor]:
     Look up the OpenADR capacity-limit sensors, keyed by the flex-context field they feed.
 
     The sensors only come into existence once a VEN client and polling schedule have been
-    configured (walkthrough steps 4 and 5), so finding none is a normal state to report
+    configured (walkthrough steps 6 and 7), so finding none is a normal state to report
     rather than an error.
 
     :param report:  Run report to record why no sensors were found, if that is the case.
