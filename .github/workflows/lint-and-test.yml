@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   zizmor:
     name: Run zizmor 🌈
@@ -33,7 +36,9 @@ jobs:
         with:
           version: "0.12.9"
           enable-cache: true
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v.7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: pre-commit/action@646c83fcd040023954eafda54b4db0192ce70507
 
   tests:
