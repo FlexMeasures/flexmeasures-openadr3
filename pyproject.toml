@@ -15,8 +15,6 @@ keywords = ["flexmeasures", "energy flexibility", "openadr", "demand response", 
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: Apache Software License",
@@ -25,12 +23,12 @@ classifiers = [
 ]
 version = "1.0"
 dependencies = [
-    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets); dev0 floor accepts the unreleased 1.0.0 pre-release builds used until 1.0.0 is officially published
+    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets)
     "openadr3-client>=2.1.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/elaadnl/flexmeasures-plugin-oadr3"
+Homepage = "https://github.com/FlexMeasures/flexmeasures-oadr3"
 
 [tool.hatch.build.targets.wheel]
 packages = ["flexmeasures_openadr3"]
