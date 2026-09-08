@@ -169,6 +169,48 @@ services:
     networks:
       - oadr3-walkthrough
 
+  scheduling-worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    depends_on:
+      fm-db:
+        condition: service_healthy
+      queue-db:
+        condition: service_started
+      server:
+        condition: service_started
+    restart: on-failure
+    environment:
+      SQLALCHEMY_DATABASE_URI: postgresql://fm-walkthrough-user:fm-walkthrough-pass@fm-db:5432/fm-walkthrough-db
+      FLEXMEASURES_REDIS_URL: queue-db
+      FLEXMEASURES_REDIS_PASSWORD: fm-redis-pass
+      SECRET_KEY: notsecret
+      SECURITY_TOTP_SECRETS: '{"1": "something-secret"}'
+      FLEXMEASURES_ENV: development
+      FLEXMEASURES_PLUGINS: flexmeasures_openadr3
+      ALLOW_INSECURE_HTTP_VTN: "true"
+      OAUTHLIB_INSECURE_TRANSPORT: "1"
+      OAUTHLIB_RELAX_TOKEN_SCOPE: "1"
+      LOGGING_LEVEL: INFO
+    volumes:
+      - ./fm-walkthrough-instance:/usr/var/flexmeasures-instance:rw
+      - ./fm-walkthrough-instance:/app/instance:rw
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # Scheduling jobs land on their own `scheduling` queue, which the `worker` service
+      # above does not serve, so without this service a triggered schedule stays QUEUED
+      # forever. It is a separate worker rather than a second queue on `worker` for two
+      # reasons: FlexMeasures only installs its scheduling-specific RQ exception handler
+      # when `--queue` is exactly `scheduling` (see flexmeasures/cli/jobs.py), which is what
+      # the `GET /sensors/<id>/schedules/<uuid>` endpoint relies on to report a failed
+      # schedule; and a minutes-long MILP solve would otherwise block the OpenADR event
+      # ingestion that the cron-scheduler keeps queueing.
+      - flexmeasures jobs run-worker --name flexmeasures-scheduling-worker --queue scheduling
+    networks:
+      - oadr3-walkthrough
+
   cron-scheduler:
     build:
       context: ../..

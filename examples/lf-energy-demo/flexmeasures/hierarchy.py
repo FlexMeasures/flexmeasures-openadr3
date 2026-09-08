@@ -48,6 +48,22 @@ SOC_SENSOR_NAME = "state of charge"
 GRID_CONNECTION_CAPACITY_SENSOR_NAME = "grid connection capacity"
 INDOOR_TEMPERATURE_SENSOR_NAME = "indoor temperature"
 
+# What turns the flexible devices from decoration into load the scheduler has to plan for.
+# A storage device whose flex-model only bounds its state of charge has no reason to ever
+# consume: an empty buffer costs nothing, so the cheapest plan is to leave it idle. Each
+# flexible device therefore also carries an *energy requirement*, recorded on its own sensor:
+#
+# - the charge points get a departure requirement (`soc-minima`) and a presence-shaped
+#   power ceiling (`power-capacity`), so a car has to be full when its driver leaves but
+#   may take its energy in whichever quarter hours of the stay are cheapest;
+# - the heat pump gets the building's heat demand (`soc-usage`), so the thermal buffer it
+#   feeds actually drains and has to be refilled.
+#
+# Without these, seven of the nine flexible devices sit at exactly 0 kW in every schedule.
+EVSE_AVAILABILITY_SENSOR_NAME = "power availability"
+SOC_MINIMA_SENSOR_NAME = "minimum state of charge"
+HEAT_DEMAND_SENSOR_NAME = "heat demand"
+
 POWER_UNIT = "kW"
 ENERGY_UNIT = "kWh"
 TEMPERATURE_UNIT = "°C"
@@ -70,6 +86,14 @@ CAMPUS_POWER_CAPACITY = "1 MVA"
 # Breaching the connection limit is expensive but not physically impossible, which is
 # what lets the scheduler weigh a short breach against a price spike.
 CAMPUS_BREACH_PRICE = "600 EUR/kW"
+
+# Missing a departure requirement is priced rather than forbidden, which keeps every
+# schedule solvable. A driver who finds the car half empty is far worse off than the site
+# is from any energy price (the day-ahead curve peaks around 0.26 EUR/kWh), so the
+# scheduler only ever leaves a car short when it physically cannot do better — a stay that
+# is too short for the deficit, or a window that starts with the departure already close.
+# Without this, such a case would come back as an infeasible schedule instead of a plan.
+CAMPUS_SOC_MINIMA_BREACH_PRICE = "5 EUR/kWh"
 
 # --- Level 2a: the EVSE charging hub -----------------------------------------
 # A sub-EMS whose flex-model entry caps the aggregate power of every charger behind it.
@@ -248,8 +272,9 @@ OFFICE_PV_MAX_DAY_CLEARNESS = 1.0
 # Passing clouds within a day, as a fraction of that day's clear-sky output.
 OFFICE_PV_CLOUD_NOISE = 0.18
 
-# The heat pump pre-heats the building before the first arrivals, which is the demo's
-# clearest example of a load worth shifting: the scheduler will move it towards cheap hours.
+# The heat pump pre-heats the building before the first arrivals. This is the reference
+# profile only — what the site would do unscheduled; the scheduler decides the real dispatch
+# against the heat demand below.
 OFFICE_HEAT_PUMP_PREHEAT_START_HOUR = 4.5
 OFFICE_HEAT_PUMP_PREHEAT_POWER = 21.0
 
@@ -267,6 +292,30 @@ OFFICE_HEAT_PUMP_NOISE = 0.08
 
 # Where the thermal buffer sits when the demo starts, as a fraction of its usable capacity.
 OFFICE_HEAT_PUMP_INITIAL_SOC_RANGE = (0.35, 0.6)
+
+# --- What the heat pump actually has to deliver -------------------------------
+# The building's heat demand, in *thermal* kW, recorded on its own sensor and referenced by
+# the heat pump's `soc-usage`. This is the drain on the thermal buffer, so it is what obliges
+# the scheduler to run the heat pump at all — and, because the buffer holds several hours of
+# it, what the scheduler is free to run early or late. Compare the electrical reference
+# profile above: 30 kW electrical at COP 3.5 is 105 kW thermal, so demand stays well inside
+# what the heat pump can deliver and the buffer can always be charged ahead of time.
+
+# An empty building at its night setback, losing heat through the envelope.
+OFFICE_HEAT_PUMP_HEAT_DEMAND_NIGHT = 22.0
+
+# Bringing a cooled-down building back up to temperature before the first arrivals is the
+# heaviest call on the buffer of the whole day.
+OFFICE_HEAT_PUMP_HEAT_DEMAND_MORNING = 62.0
+
+# During office hours people, lighting and equipment contribute heat, so what the buffer
+# still has to supply is well below the morning call.
+OFFICE_HEAT_PUMP_HEAT_DEMAND_OCCUPIED = 34.0
+
+# Nobody is coming in, so the building is allowed to drift and demand falls away.
+OFFICE_HEAT_PUMP_HEAT_DEMAND_WEEKEND_FACTOR = 0.4
+
+OFFICE_HEAT_PUMP_HEAT_DEMAND_NOISE = 0.06
 
 # Commuters plug in around the start of the office day and leave around the end of it.
 # Spread is a standard deviation; the bounds keep the tail of the distribution plausible.
@@ -289,13 +338,31 @@ EVSE_WEEKDAY_OCCUPANCY = 0.85
 EVSE_WEEKEND_OCCUPANCY = 0.1
 
 # How much energy a commuter needs, as a fraction of the connected car's usable battery.
+# Only shapes the unscheduled reference profile; what the scheduler has to deliver is the
+# departure requirement below.
 EVSE_SESSION_ENERGY_FRACTION = (0.25, 0.75)
 
-# Most cars cannot accept the full rating of the charge point, because their onboard charger is the bottleneck.
-EVSE_ACCEPTED_POWER_FRACTION = (0.5, 1.0)
+# Most cars cannot accept the full rating of the charge point, because their onboard charger
+# is the bottleneck. The floor is deliberately not much below the rating: this fraction also
+# becomes the charge point's `power-capacity` while the car is plugged in, so a car that
+# accepted only a fraction of the rating could not physically meet its departure requirement
+# within the stay, and the scheduler would have to buy off a breach instead of planning.
+EVSE_ACCEPTED_POWER_FRACTION = (0.7, 1.0)
 
-# Where a connected car's battery sits when the demo starts, as a fraction of its usable capacity.
-EVSE_INITIAL_SOC_RANGE = (0.2, 0.5)
+# Where a connected car's battery sits when the demo starts, as a fraction of its usable
+# capacity. A commuter arrives on a low battery, which is precisely why the fleet is worth
+# scheduling: the deficit between this and the departure requirement below is the energy the
+# scheduler gets to place in the cheapest quarter hours of the stay.
+EVSE_INITIAL_SOC_RANGE = (0.15, 0.35)
+
+# What the driver expects to find in the car at departure, as a fraction of usable battery.
+# Recorded on each charge point's `minimum state of charge` sensor as a requirement that only
+# applies in the quarter hour the car leaves in, and referenced by the flex-model's
+# `soc-minima`. Confining it to that one quarter hour is what leaves the whole stay free:
+# a requirement that also applied earlier would force charging on arrival instead.
+# Only commuter stays carry one — an early bird plugged in for an hour is topping up, not
+# expecting a full battery, and a short stay could not honour it anyway.
+EVSE_DEPARTURE_SOC_FRACTION = (0.8, 0.95)
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,12 +411,15 @@ __all__ = [
     "CAMPUS_BREACH_PRICE",
     "CAMPUS_NAME",
     "CAMPUS_POWER_CAPACITY",
+    "CAMPUS_SOC_MINIMA_BREACH_PRICE",
     "CONTRACT_RESOLUTION",
     "ENERGY_UNIT",
     "EVSE_ACCEPTED_POWER_FRACTION",
     "EVSE_ARRIVAL_HOUR",
     "EVSE_ARRIVAL_SPREAD_HOURS",
+    "EVSE_AVAILABILITY_SENSOR_NAME",
     "EVSE_DEPARTURE_HOUR",
+    "EVSE_DEPARTURE_SOC_FRACTION",
     "EVSE_DEPARTURE_SPREAD_HOURS",
     "EVSE_EARLIEST_ARRIVAL_HOUR",
     "EVSE_EARLIEST_DEPARTURE_HOUR",
@@ -368,6 +438,7 @@ __all__ = [
     "FLEXMEASURES_URL",
     "FORECAST_HORIZON",
     "GRID_CONNECTION_CAPACITY_SENSOR_NAME",
+    "HEAT_DEMAND_SENSOR_NAME",
     "INDOOR_TEMPERATURE_SENSOR_NAME",
     "OFFICE_BASELOAD_DAY_POWER",
     "OFFICE_BASELOAD_LUNCH_DIP",
@@ -380,6 +451,11 @@ __all__ = [
     "OFFICE_CLOSING_HOUR",
     "OFFICE_HEAT_PUMP_CHARGING_EFFICIENCY",
     "OFFICE_HEAT_PUMP_COP",
+    "OFFICE_HEAT_PUMP_HEAT_DEMAND_MORNING",
+    "OFFICE_HEAT_PUMP_HEAT_DEMAND_NIGHT",
+    "OFFICE_HEAT_PUMP_HEAT_DEMAND_NOISE",
+    "OFFICE_HEAT_PUMP_HEAT_DEMAND_OCCUPIED",
+    "OFFICE_HEAT_PUMP_HEAT_DEMAND_WEEKEND_FACTOR",
     "OFFICE_HEAT_PUMP_IDLE_POWER",
     "OFFICE_HEAT_PUMP_INITIAL_SOC_RANGE",
     "OFFICE_HEAT_PUMP_NAME",
@@ -425,6 +501,7 @@ __all__ = [
     "SITE_LATITUDE",
     "SITE_LONGITUDE",
     "SITE_TIMEZONE",
+    "SOC_MINIMA_SENSOR_NAME",
     "SOC_RESOLUTION",
     "SOC_SENSOR_NAME",
     "TEMPERATURE_UNIT",

@@ -16,11 +16,14 @@ token flow is needed:
 Three kinds of belief are written, by two clearly-labelled data sources, because they do
 not mean the same thing:
 
-- *Forecasts*, by the `LF Energy demo forecaster` source, on the day-ahead price sensor and
-  on the office's background load and rooftop PV. The latter two are the site's
-  `inflexible-consumption` and `inflexible-production`, so the scheduler reads them as given
-  and plans around them; the prices are what it optimises against. All three are genuine
-  forecasts: their belief time precedes their knowledge time.
+- *Forecasts*, by the `LF Energy demo forecaster` source: everything the scheduler reads as
+  given and plans around. The day-ahead prices are what it optimises against. The office's
+  background load and rooftop PV are the site's `inflexible-consumption` and
+  `inflexible-production`. And each flexible device's *energy requirement* is a forecast
+  too — the building's heat demand, and every charge point's power availability and
+  departure requirement — because those describe the weather, the building and the drivers
+  rather than anything the scheduler decides. They are genuine forecasts: their belief time
+  precedes their knowledge time.
 - *Reference profiles*, by the `LF Energy demo profiles` source, on the charge points and
   the heat pump. Those are the devices the scheduler dispatches, so a fixed week of power
   values is not a forecast of anything: it is what the site would do unscheduled, kept
@@ -70,7 +73,9 @@ from hierarchy import (
     EVSE_ACCEPTED_POWER_FRACTION,
     EVSE_ARRIVAL_HOUR,
     EVSE_ARRIVAL_SPREAD_HOURS,
+    EVSE_AVAILABILITY_SENSOR_NAME,
     EVSE_DEPARTURE_HOUR,
+    EVSE_DEPARTURE_SOC_FRACTION,
     EVSE_DEPARTURE_SPREAD_HOURS,
     EVSE_EARLIEST_ARRIVAL_HOUR,
     EVSE_EARLIEST_DEPARTURE_HOUR,
@@ -86,6 +91,7 @@ from hierarchy import (
     EVSE_WEEKEND_OCCUPANCY,
     FLEXMEASURES_URL,
     FORECAST_HORIZON,
+    HEAT_DEMAND_SENSOR_NAME,
     OFFICE_BASELOAD_DAY_POWER,
     OFFICE_BASELOAD_LUNCH_DIP,
     OFFICE_BASELOAD_LUNCH_HOUR,
@@ -95,6 +101,11 @@ from hierarchy import (
     OFFICE_BASELOAD_NOISE,
     OFFICE_BASELOAD_WEEKEND_DAY_POWER,
     OFFICE_CLOSING_HOUR,
+    OFFICE_HEAT_PUMP_HEAT_DEMAND_MORNING,
+    OFFICE_HEAT_PUMP_HEAT_DEMAND_NIGHT,
+    OFFICE_HEAT_PUMP_HEAT_DEMAND_NOISE,
+    OFFICE_HEAT_PUMP_HEAT_DEMAND_OCCUPIED,
+    OFFICE_HEAT_PUMP_HEAT_DEMAND_WEEKEND_FACTOR,
     OFFICE_HEAT_PUMP_IDLE_POWER,
     OFFICE_HEAT_PUMP_INITIAL_SOC_RANGE,
     OFFICE_HEAT_PUMP_NAME,
@@ -132,6 +143,7 @@ from hierarchy import (
     PRICE_SENSOR_NAME,
     PRICE_WEEKEND_FACTOR,
     SITE_TIMEZONE,
+    SOC_MINIMA_SENSOR_NAME,
     SOC_SENSOR_NAME,
     EvseSpec,
     ShoulderSession,
@@ -165,16 +177,23 @@ class ChargingSession:
     """
     One car, plugged into one charge point, for one continuous stay.
 
-    :param start:   Local time the car arrives.
-    :param end:     Local time it leaves.
-    :param energy:  Energy the driver wants delivered during the stay, in the sensor's energy unit.
-    :param power:   Power the car accepts, which is at most the charge point's rating.
+    :param start:       Local time the car arrives.
+    :param end:         Local time it leaves.
+    :param energy:      Energy the driver wants delivered during the stay, in the sensor's
+                        energy unit. Shapes the unscheduled reference profile only.
+    :param power:       Power the car accepts, which is at most the charge point's rating.
+    :param target_soc:  State of charge the car has to reach by departure, in the sensor's
+                        energy unit, or None for a stay that carries no requirement. This
+                        is what the scheduler is actually held to. Only commuter stays have
+                        one: an early bird plugged in for an hour is topping up, and a stay
+                        that short could not honour a full battery anyway.
     """
 
     start: pd.Timestamp
     end: pd.Timestamp
     energy: float
     power: float
+    target_soc: float | None
 
 
 @dataclass
@@ -520,6 +539,7 @@ def commuter_session(spec: EvseSpec, day: date, rng: random.Random) -> ChargingS
         end=at_local_hour(day, departure_hour),
         energy=quantity_in(spec.soc_max, ENERGY_UNIT) * rng.uniform(*EVSE_SESSION_ENERGY_FRACTION),
         power=quantity_in(spec.power_capacity, POWER_UNIT) * rng.uniform(*EVSE_ACCEPTED_POWER_FRACTION),
+        target_soc=quantity_in(spec.soc_max, ENERGY_UNIT) * rng.uniform(*EVSE_DEPARTURE_SOC_FRACTION),
     )
 
 
@@ -540,6 +560,7 @@ def shoulder_session(session: ShoulderSession, spec: EvseSpec, day: date, rng: r
         end=at_local_hour(day, start_hour + duration_hours),
         energy=quantity_in(spec.soc_max, ENERGY_UNIT) * rng.uniform(*session.energy_fraction),
         power=quantity_in(spec.power_capacity, POWER_UNIT) * rng.uniform(*EVSE_ACCEPTED_POWER_FRACTION),
+        target_soc=None,
     )
 
 
@@ -625,6 +646,96 @@ def charge_point_day(spec: EvseSpec, day: date, timestamps: pd.DatetimeIndex, rn
     sessions = plan_charging_sessions(spec, day, rng)
     step_hours = POWER_RESOLUTION.total_seconds() / SECONDS_PER_HOUR
     return [charging_power(sessions, timestamp, step_hours) for timestamp in timestamps]
+
+
+def charge_point_availability_day(spec: EvseSpec, day: date, timestamps: pd.DatetimeIndex, rng: random.Random) -> list[float]:
+    """
+    Generate one day of the power a charge point may move, in kW.
+
+    Zero while the bay is empty and the connected car's accepted power while it is not, so
+    the flex-model's `power-capacity` stops the scheduler charging a bay with no car in it.
+    It caps both directions, which is what also keeps the two V2G charge points from
+    discharging a car that has already driven away.
+
+    The day's stays are drawn exactly as charge_point_day draws them — same seeded
+    generator, same call, same order — so a charge point's availability, its departure
+    requirement and its reference profile always describe the same cars.
+
+    :param spec:        Rating and battery limits of the charge point.
+    :param day:         The local calendar day.
+    :param timestamps:  Every local event start of that day.
+    :param rng:         The profile's seeded random generator.
+    :returns:           One power ceiling per timestamp.
+    """
+    sessions = plan_charging_sessions(spec, day, rng)
+    return [next((session.power for session in sessions if session.start <= timestamp < session.end), 0.0) for timestamp in timestamps]
+
+
+def charge_point_soc_minima_day(spec: EvseSpec, day: date, timestamps: pd.DatetimeIndex, rng: random.Random) -> list[float]:
+    """
+    Generate one day of the state of charge a charge point's car has to have reached, in kWh.
+
+    Zero for all but one quarter hour of each commuter stay: the last quarter hour that ends
+    before the car leaves carries the state of charge the driver expects to find. Confining
+    the requirement to that single interval is deliberate — it is what leaves the scheduler
+    free to deliver the energy in whichever quarter hours of the stay are cheapest, which is
+    the flexibility the day-ahead price and the OpenADR limit then compete over. A
+    requirement that applied throughout the stay would instead force charging on arrival.
+
+    Every interval gets an explicit value rather than being left empty, because FlexMeasures
+    fills gaps in a sensor-referenced flex-model field: a blank interval would inherit the
+    departure requirement and quietly oblige the car to stay full all day.
+
+    :param spec:        Rating and battery limits of the charge point.
+    :param day:         The local calendar day.
+    :param timestamps:  Every local event start of that day.
+    :param rng:         The profile's seeded random generator.
+    :returns:           One required state of charge per timestamp.
+    """
+    sessions = plan_charging_sessions(spec, day, rng)
+    requirements = {}
+    for session in sessions:
+        if session.target_soc is None:
+            continue
+        # The last event that ends within the stay, so the requirement is met while the car
+        # is still plugged in rather than a quarter hour after it has left.
+        within = [timestamp for timestamp in timestamps if timestamp + POWER_RESOLUTION <= session.end]
+        if within:
+            requirements[max(within)] = session.target_soc
+    return [requirements.get(timestamp, 0.0) for timestamp in timestamps]
+
+
+def office_heat_demand_day(day: date, timestamps: pd.DatetimeIndex, rng: random.Random) -> list[float]:
+    """
+    Generate one day of the building's heat demand, in thermal kW.
+
+    This is the drain on the heat pump's thermal buffer, and therefore the reason the
+    scheduler runs the heat pump at all. It follows the building's day: the heaviest call is
+    bringing a cooled-down building back up to temperature before the first arrivals, it
+    falls back once people, lighting and equipment are contributing heat of their own, and
+    it drops to envelope losses overnight. Weekends are much lower, because nobody is coming
+    in and the building is allowed to drift.
+
+    Expressed in thermal kW to match the thermal state of charge, so it is the heat pump's
+    coefficient of performance that decides what this costs electrically.
+
+    :param day:         The local calendar day.
+    :param timestamps:  Every local event start of that day.
+    :param rng:         The profile's seeded random generator.
+    :returns:           One heat demand per timestamp.
+    """
+    setback = 1.0 if day.weekday() < SATURDAY else OFFICE_HEAT_PUMP_HEAT_DEMAND_WEEKEND_FACTOR
+    values = []
+    for timestamp in timestamps:
+        hour = local_hour(timestamp)
+        if OFFICE_HEAT_PUMP_PREHEAT_START_HOUR <= hour < OFFICE_OPENING_HOUR:
+            demand = OFFICE_HEAT_PUMP_HEAT_DEMAND_MORNING
+        elif OFFICE_OPENING_HOUR <= hour < OFFICE_CLOSING_HOUR:
+            demand = OFFICE_HEAT_PUMP_HEAT_DEMAND_OCCUPIED
+        else:
+            demand = OFFICE_HEAT_PUMP_HEAT_DEMAND_NIGHT
+        values.append(demand * setback * jitter(rng, OFFICE_HEAT_PUMP_HEAT_DEMAND_NOISE))
+    return values
 
 
 def generate_profile(
@@ -750,7 +861,9 @@ def seed_office(account: Account, forecaster: DataSource, profiles: DataSource, 
     The background load and the PV are the site's `inflexible-consumption` and
     `inflexible-production`, so what they get is a forecast the scheduler plans around.
     The heat pump is dispatched by the scheduler, so what it gets is a reference profile
-    plus a current state of charge.
+    plus a current state of charge — and a heat demand forecast, which is not a reference
+    profile but an input: it is the drain on the thermal buffer that obliges the scheduler
+    to run the heat pump in the first place.
 
     :param account:     Account that owns the demo hierarchy.
     :param forecaster:  Data source for genuine forecasts.
@@ -769,18 +882,37 @@ def seed_office(account: Account, forecaster: DataSource, profiles: DataSource, 
     count = store_profile(power, profiles, generate_profile(OFFICE_HEAT_PUMP_NAME, office_heat_pump_day, window), report.belief_time)
     report.record_profile(power, count, is_forecast=False)
 
+    heat_demand = find_sensor(heat_pump, HEAT_DEMAND_SENSOR_NAME)
+    values = generate_profile(HEAT_DEMAND_SENSOR_NAME, office_heat_demand_day, window)
+    count = store_profile(heat_demand, forecaster, values, report.belief_time)
+    report.record_profile(heat_demand, count, is_forecast=True)
+
     state_of_charge = find_sensor(heat_pump, SOC_SENSOR_NAME)
     value = store_state_of_charge(state_of_charge, profiles, OFFICE_HEAT_PUMP_SOC_MAX, OFFICE_HEAT_PUMP_INITIAL_SOC_RANGE, report.window_start)
     report.record_state_of_charge(state_of_charge, value)
 
 
-def seed_charge_points(account: Account, profiles: DataSource, report: ForecastReport) -> None:
+def seed_charge_points(account: Account, forecaster: DataSource, profiles: DataSource, report: ForecastReport) -> None:
     """
     Seed every charge point of the hub with a typical week and a connected car's state of charge.
 
-    :param account:   Account that owns the demo hierarchy.
-    :param profiles:  Data source for synthetic reference profiles and readings.
-    :param report:    Run report to record the outcome in.
+    Three profiles per charge point, all drawn from the same stays so they cannot disagree
+    about which cars turned up, but meaning three different things:
+
+    - the *reference* power profile, what the bay would draw unscheduled, which the
+      scheduler overwrites;
+    - the *availability* forecast, the power the bay may move, which is zero whenever no car
+      is plugged in;
+    - the *departure requirement* forecast, the state of charge each commuter's car has to
+      have reached by the time they leave.
+
+    The last two are forecasts of driver behaviour that the scheduler plans around, not
+    reference profiles it replaces, so they are attributed to the forecaster.
+
+    :param account:     Account that owns the demo hierarchy.
+    :param forecaster:  Data source for genuine forecasts.
+    :param profiles:    Data source for synthetic reference profiles and readings.
+    :param report:      Run report to record the outcome in.
     """
     window = (report.window_start, report.window_end)
 
@@ -791,6 +923,17 @@ def seed_charge_points(account: Account, profiles: DataSource, report: ForecastR
         day_profile = partial(charge_point_day, spec)
         count = store_profile(power, profiles, generate_profile(spec.name, day_profile, window), report.belief_time)
         report.record_profile(power, count, is_forecast=False)
+
+        # Keyed on the charge point's own name, like the reference profile above, so all
+        # three profiles are generated from the same seeded draw of the day's stays.
+        for sensor_name, generator in (
+            (EVSE_AVAILABILITY_SENSOR_NAME, charge_point_availability_day),
+            (SOC_MINIMA_SENSOR_NAME, charge_point_soc_minima_day),
+        ):
+            sensor = find_sensor(charge_point, sensor_name)
+            values = generate_profile(spec.name, partial(generator, spec), window)
+            count = store_profile(sensor, forecaster, values, report.belief_time)
+            report.record_profile(sensor, count, is_forecast=True)
 
         state_of_charge = find_sensor(charge_point, SOC_SENSOR_NAME)
         value = store_state_of_charge(state_of_charge, profiles, spec.soc_max, EVSE_INITIAL_SOC_RANGE, report.window_start)
@@ -847,7 +990,7 @@ def main() -> None:
 
         seed_day_ahead_prices(forecaster, report)
         seed_office(account, forecaster, profiles, report)
-        seed_charge_points(account, profiles, report)
+        seed_charge_points(account, forecaster, profiles, report)
 
         db.session.commit()
         print_summary(report, campus)

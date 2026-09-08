@@ -39,13 +39,16 @@ from hierarchy import (
     CAMPUS_BREACH_PRICE,
     CAMPUS_NAME,
     CAMPUS_POWER_CAPACITY,
+    CAMPUS_SOC_MINIMA_BREACH_PRICE,
     CONTRACT_RESOLUTION,
     ENERGY_UNIT,
+    EVSE_AVAILABILITY_SENSOR_NAME,
     EVSE_HUB_NAME,
     EVSE_HUB_POWER_CAPACITY,
     EVSE_SPECS,
     FLEXMEASURES_URL,
     GRID_CONNECTION_CAPACITY_SENSOR_NAME,
+    HEAT_DEMAND_SENSOR_NAME,
     INDOOR_TEMPERATURE_SENSOR_NAME,
     OFFICE_BASELOAD_NAME,
     OFFICE_HEAT_PUMP_CHARGING_EFFICIENCY,
@@ -69,6 +72,7 @@ from hierarchy import (
     SITE_LATITUDE,
     SITE_LONGITUDE,
     SITE_TIMEZONE,
+    SOC_MINIMA_SENSOR_NAME,
     SOC_RESOLUTION,
     SOC_SENSOR_NAME,
     TEMPERATURE_UNIT,
@@ -295,6 +299,10 @@ def build_campus(builder: DemoSiteBuilder, price_sensor: Sensor) -> tuple[Generi
         "site-power-capacity": CAMPUS_POWER_CAPACITY,
         "site-consumption-breach-price": CAMPUS_BREACH_PRICE,
         "site-production-breach-price": CAMPUS_BREACH_PRICE,
+        # Prices the charge points' departure requirements rather than forbidding them, so a
+        # stay too short for the car's deficit yields a plan with a costed shortfall instead
+        # of an infeasible schedule.
+        "soc-minima-breach-price": CAMPUS_SOC_MINIMA_BREACH_PRICE,
         # The site's own power sensor doubles as the output for the scheduled aggregate.
         "aggregate-consumption": {"sensor": campus_power.id},
     }
@@ -370,6 +378,22 @@ def build_charge_point(builder: DemoSiteBuilder, hub: GenericAsset, spec: EvseSp
     """
     Create one charge point below the hub.
 
+    Two sensors beyond the usual power and state of charge are what make the charge point a
+    load the scheduler has to plan for rather than an idle battery:
+
+    - `power availability` drives `power-capacity`, so the charge point can only move power
+      while a car is actually plugged in. It replaces the static nameplate rating, which
+      would have let the scheduler charge an empty bay at three in the morning.
+    - `minimum state of charge` drives `soc-minima`, the requirement that the connected car
+      is full when its driver leaves. This is the charge point's reason to consume at all:
+      with only soc-min and soc-max, an empty battery costs nothing and the cheapest plan is
+      never to charge — which is exactly what earlier versions of this demo produced.
+
+    Between them the driver's deficit becomes a fixed amount of energy that has to be
+    delivered inside a known stay, leaving the scheduler free to choose *which* quarter
+    hours of that stay to use. That freedom is what the day-ahead price and the OpenADR
+    capacity limit then compete over.
+
     :param builder:  Builder holding the target account.
     :param hub:      Parent hub asset, which also acts as the charge point's device group.
     :param spec:     Rating and battery limits of this charge point.
@@ -384,12 +408,17 @@ def build_charge_point(builder: DemoSiteBuilder, hub: GenericAsset, spec: EvseSp
     )
     power = builder.power_sensor(charge_point)
     state_of_charge = builder.sensor(charge_point, SOC_SENSOR_NAME, ENERGY_UNIT, event_resolution=SOC_RESOLUTION)
+    availability = builder.sensor(charge_point, EVSE_AVAILABILITY_SENSOR_NAME, POWER_UNIT)
+    soc_minima = builder.sensor(charge_point, SOC_MINIMA_SENSOR_NAME, ENERGY_UNIT)
 
     charge_point.flex_model = {
         "group": {"asset": hub.id},
-        "power-capacity": spec.power_capacity,
+        # A sensor rather than spec.power_capacity: zero while the bay is empty, and the
+        # connected car's accepted power while it is not.
+        "power-capacity": {"sensor": availability.id},
         "soc-min": spec.soc_min,
         "soc-max": spec.soc_max,
+        "soc-minima": {"sensor": soc_minima.id},
         "roundtrip-efficiency": spec.roundtrip_efficiency,
         "state-of-charge": {"sensor": state_of_charge.id},
         "consumption": {"sensor": power.id},
@@ -509,6 +538,14 @@ def build_office_heat_pump(builder: DemoSiteBuilder, office: GenericAsset) -> Se
     from electricity to stored heat, which may exceed 100% for exactly this purpose.
     Power is therefore electrical while state of charge is thermal.
 
+    The `heat demand` sensor is what gives the heat pump a reason to run. It carries the
+    building's heat demand in thermal kW and drives `soc-usage`, the drain on the buffer.
+    Without it the flex-model only bounded the buffer, so letting it sit empty cost nothing
+    and the scheduler left the heat pump at 0 kW in every interval of every schedule. With
+    it, the demand has to be met — and because the buffer holds several hours of it, the
+    scheduler may meet it early or late, which is what makes the heat pump a second device
+    that reacts to prices and to the OpenADR capacity limit.
+
     :param builder:  Builder holding the target account.
     :param office:   Parent office asset, which also acts as the heat pump's device group.
     :returns:        The heat pump's power sensor.
@@ -520,6 +557,7 @@ def build_office_heat_pump(builder: DemoSiteBuilder, office: GenericAsset) -> Se
     heat_pump = builder.asset(OFFICE_HEAT_PUMP_NAME, "heat-storage", description, parent=office)
     heat_pump_power = builder.power_sensor(heat_pump)
     state_of_charge = builder.sensor(heat_pump, SOC_SENSOR_NAME, ENERGY_UNIT, event_resolution=SOC_RESOLUTION)
+    heat_demand = builder.sensor(heat_pump, HEAT_DEMAND_SENSOR_NAME, POWER_UNIT)
 
     heat_pump.flex_model = {
         "group": {"asset": office.id},
@@ -528,6 +566,9 @@ def build_office_heat_pump(builder: DemoSiteBuilder, office: GenericAsset) -> Se
         "production-capacity": "0 kW",
         "soc-min": OFFICE_HEAT_PUMP_SOC_MIN,
         "soc-max": OFFICE_HEAT_PUMP_SOC_MAX,
+        # A list, because FlexMeasures lets several drains add up into one aggregate usage;
+        # the demo has just the one. Thermal kW, matching the thermal state of charge.
+        "soc-usage": [{"sensor": heat_demand.id}],
         # Mutually exclusive with `roundtrip-efficiency`, which the charge points use instead.
         "charging-efficiency": OFFICE_HEAT_PUMP_CHARGING_EFFICIENCY,
         "storage-efficiency": OFFICE_HEAT_PUMP_STORAGE_EFFICIENCY,

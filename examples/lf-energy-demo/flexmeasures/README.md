@@ -46,6 +46,34 @@ electricity to stored heat, which is allowed to exceed 100%, unlike `roundtrip-e
 which the charge points use). Its `power` sensor is therefore electrical while its
 `state of charge` sensor is thermal.
 
+### The sensors that give flexible devices something to do
+
+A storage device whose flex-model only bounds its state of charge (`soc-min`/`soc-max`) has
+no reason to ever consume: an empty buffer costs nothing, so the cheapest plan is to leave
+it idle at 0 kW forever, regardless of price or any capacity signal. That was true of 7 of
+the demo's 9 flexible devices until three extra sensors were added, each of which drives a
+flex-model field that gives the scheduler an actual energy requirement to plan around:
+
+| Sensor | Unit | On | Drives | Purpose |
+| --- | --- | --- | --- | --- |
+| `power availability` | kW | each charge point | `power-capacity` | Zero while the bay is empty, the connected car's accepted power while occupied — replaces a static nameplate rating, which would let the scheduler charge an empty bay at 3am. |
+| `minimum state of charge` | kWh | each charge point | `soc-minima` | The departure requirement, but recorded as nonzero in *only the single quarter-hour interval the car leaves in* — every other interval is explicitly `0.0`, not blank. This is the charge point's reason to consume at all: without it, an empty battery costs nothing and the cheapest plan is never to charge. |
+| `heat demand` | kW (thermal) | `demo-office-heat-pump` | `soc-usage` | The actual drain on the thermal buffer, following the building's day: heaviest just before the first arrivals, falling back once the building is occupied and gaining incidental heat, low overnight and much lower at weekends. |
+
+Two details matter for `minimum state of charge`: FlexMeasures gap-fills blank intervals on
+a sensor forward from the last recorded value, so leaving the non-departure intervals blank
+would silently oblige the car to stay full all day instead of only at departure — they are
+written as `0.0` on purpose. And the campus flex-context carries a matching
+`soc-minima-breach-price: "5 EUR/kWh"`, so a stay too short for its deficit produces a
+costed shortfall instead of an infeasible schedule.
+
+All three of these sensors are **forecasts**, written by `LF Energy demo forecaster` — they
+describe the weather, building and driver behaviour the scheduler plans around, the same
+category as prices and the office's inflexible load. That's different from the charge
+points' and heat pump's own `power` sensors, which stay reference profiles: those describe
+what the site would do unscheduled, whereas the scheduler now genuinely dispatches these
+devices against the requirement.
+
 It is idempotent: assets and sensors are fetched by name before being created, so
 re-running it only reprints the summary.
 
@@ -56,18 +84,31 @@ belief, from two data sources, because they do not mean the same thing:
 
 | Sensors | Data source | Kind |
 | --- | --- | --- |
-| `NL transmission zone/day-ahead prices`, `demo-office-baseload/power`, `demo-office-pv/power` | `LF Energy demo forecaster` (type `forecaster`) | Forecast |
+| `NL transmission zone/day-ahead prices`, `demo-office-baseload/power`, `demo-office-pv/power`, `demo-evse-01…08/power availability`, `demo-evse-01…08/minimum state of charge`, `demo-office-heat-pump/heat demand` | `LF Energy demo forecaster` (type `forecaster`) | Forecast |
 | `demo-evse-01…08/power`, `demo-office-heat-pump/power` | `LF Energy demo profiles` (type `demo script`) | Reference profile |
 | `demo-evse-01…08/state of charge`, `demo-office-heat-pump/state of charge` | `LF Energy demo profiles` (type `demo script`) | Measurement, one per device |
 
 The distinction is deliberate. The price curve is what the scheduler optimises against, and
 the office's background load and its rooftop PV are the site's `inflexible-consumption` and
 `inflexible-production`: the scheduler cannot move them, so it needs to know what they will
-do, and a forecast is exactly the right thing to give it. The charge points and the heat
-pump are what the scheduler *does* move, so a fixed week of power values for them is not a
-forecast of anything — it is what the site would do unscheduled, kept only so the charts are
-not empty before the first schedule runs. The scheduler writes its own beliefs, from its own
-source, over the same window.
+do, and a forecast is exactly the right thing to give it. Each flexible device's *energy
+requirement* — a charge point's power availability and departure requirement, the heat
+pump's heat demand — is a forecast for the same reason: it describes the weather, the
+building and the drivers, not anything the scheduler decides, so it belongs to the
+forecaster too, even though it lives on the same devices the scheduler dispatches. The
+charge points' and the heat pump's own `power` sensors are what the scheduler *does* move,
+so a fixed week of power values for them is not a forecast of anything — it is what the site
+would do unscheduled, kept only so the charts are not empty before the first schedule runs.
+The scheduler writes its own beliefs, from its own source, over the same window.
+
+All three energy-requirement sensors are generated from the same seeded draw of each day's
+charging/heating stays as their device's reference profile, so a charge point's availability,
+its departure requirement and its unscheduled power profile can never disagree about which
+car showed up. The departure requirement (`minimum state of charge`) is written as an
+explicit `0.0` in every quarter hour except the one the car leaves in, never left blank:
+FlexMeasures gap-fills a blank interval on a sensor-referenced flex-model field forward from
+the last recorded value, so a blank would inherit the departure figure and quietly oblige
+the car to stay full all day.
 
 Prices are the only profile written outside the demo account: the `day-ahead prices` sensor
 lives on FlexMeasures' public `NL transmission zone` asset, which is what the campus'
@@ -106,15 +147,31 @@ disagree with the schedule as soon as one is triggered.
   array's nameplate rating.
 - **`demo-office-heat-pump`** pre-heats the building in the small hours and only tops the
   buffer up while the building is occupied and generating its own incidental heat, with a
-  deep setback at the weekend. Moving exactly that pre-heat block towards cheap hours is
-  what the scheduler is for.
+  deep setback at the weekend. This reference profile is what an unscheduled pre-heat block
+  would look like; the scheduler decides the real dispatch against the `heat demand`
+  forecast instead (see above), which is the drain on the same thermal buffer and is what
+  actually obliges the scheduler to run the heat pump at all. Heaviest just before the first
+  arrivals, falling back once the building is occupied and gaining incidental heat, low
+  overnight and much lower at weekends — expressed in thermal kW, so it's the heat pump's
+  coefficient of performance that decides what meeting it costs electrically.
 - **`demo-evse-01 … 08`** see a commuter arrive around 08:00 and leave around 17:00 on most
   weekdays, with an occasional shorter stay before or after for an early bird or a late
   worker, and a near-empty hub at the weekend. Arrival, departure, energy demand and the
   power the car accepts are all drawn per charge point per day, so the hub's aggregate
   looks like a hub rather than like eight identical rectangles. No session ever exceeds its
   charge point's rating, and the two bidirectional charge points stay charge-only:
-  discharging is a scheduling decision, not typical usage.
+  discharging is a scheduling decision, not typical usage. The same drawn stays also produce
+  each charge point's `power availability` and `minimum state of charge` forecasts (see
+  above); only commuter stays carry a departure requirement, since a short stay before or
+  after the working day is a top-up, not a promise of a full battery.
+
+**General lesson:** a FlexMeasures storage device's flex-model needs an actual energy
+requirement — `soc-usage`, `soc-minima`, or `soc-targets` — not just `soc-min`/`soc-max`
+bounds, or the scheduler has no reason to ever move it: an empty buffer costs nothing, so
+leaving it idle is always at least as cheap as running it. That was true of the heat pump
+and of 6 of the 8 charge points in an earlier version of this demo, all of which sat at
+0 kW in every schedule regardless of price or capacity signal, and is why every flexible
+device here carries one of these fields now.
 
 ### Determinism
 
@@ -134,11 +191,16 @@ account other than the walkthrough's toy account.
 
 ## Ties into the rest of the walkthrough
 
-Once a VEN client and polling schedule exist (walkthrough steps 6 and 7), re-run
+Once a VEN client and polling schedule exist (walkthrough steps 7 and 8), re-run
 `seed_assets.py`: it points the campus' `site-consumption-capacity` and
 `site-production-capacity` at the OpenADR import and export capacity-limit sensors, turning
 the fetched DR signal into a scheduling constraint. Before then it reports the wiring as
 skipped.
+
+`../python/compare_schedules.py` triggers a schedule against this hierarchy twice —
+once before this wiring exists and once after (walkthrough Steps 4 and 10) — and compares
+the two plans, so you can see exactly what the capacity limits changed rather than just
+that a sensor now holds new values.
 
 ## Before triggering a schedule
 
