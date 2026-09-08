@@ -1,0 +1,5 @@
+fm-walkthrough-instance/*
+!fm-walkthrough-instance/flexmeasures.cfg
+
+# Plans saved by python/compare_schedules.py, and the comparison.html diagram it draws from them.
+schedule-runs/
