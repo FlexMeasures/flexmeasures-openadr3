@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flexmeasures-openadr3"
+description = "A plugin which implements OpenADR 3 VEN functionality for FlexMeasures. Allowing for ingestion of ADR signals."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    {name = "Nick van der Burgt", email = "nick.van.der.burgt@elaad.nl"}
+]
+keywords = ["flexmeasures", "energy flexibility", "openadr", "demand response", "ven"]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+version = "1.0"
+dependencies = [
+    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets)
+    "openadr3-client>=2.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/FlexMeasures/flexmeasures-oadr3"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flexmeasures_openadr3"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/flexmeasures_openadr3",
+    "/flexmeasures_openadr3/py.typed",
+    "/README.md",
+]
+
+# UV-specific configuration
+[tool.uv]
+environments = [
+    "sys_platform == 'darwin'",
+    "sys_platform == 'linux'",
+]
+
+[dependency-groups]
+dev = [
+    # Inherits from [project.optional-dependencies.dev]
+    # Testing
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    # Linting & formatting
+    "mypy>=1.0.0",
+    "ruff>=0.15.11",
+    # Pre-commit
+    "pre-commit>=3.0.0",
+    "types-pytz>=2026.1.1.20260408",
+    "types-requests>=2.33.0.20260408",
+    "types-flask>=1.1.6",
+    "types-click>=7.1.8",
+    "types-redis>=4.6.0.20241004",
+    "types-tzlocal>=5.1.0.1",
+    "types-python-dateutil>=2.9.0.20260408",
+    "rq-dashboard>=0.8.6",
+    "fakeredis>=2.35.1",
+    "types-docker>=7.1.0.20260518",
+    "testcontainers[keycloak,postgres]>=4.14.2",
+]
+
+# Existing tool configurations (keep these as-is)
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["--import-mode=importlib"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["flexmeasures_openadr3"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["flask_login.*", "flexmeasures.*", "tests.*", "testcontainers.*", "settings"]
+ignore_missing_imports = true
+disallow_untyped_defs = false
+
+[tool.ruff]
+line-length = 175
+
+[tool.ruff.lint]
+select = ["ALL"]
+
+# Do not require docstrings for functions, methods and classes
+ignore = [
+    # From:https://github.com/wemake-services/wemake-django-template/blob/master/pyproject.toml
+    "A005",   # allow to shadow stdlib and builtin module names
+    "COM812", # trailing comma, conflicts with `ruff format`
+    # Different doc rules that we don't really care about:
+    "D100",
+    "D104",
+    "D106",
+    "D203",
+    "D212",
+    "D401",
+    "D404",
+    "D405",
+    "ISC001",  # implicit string concat conflicts with `ruff format`
+    "ISC003",  # prefer explicit string concat over implicit concat
+    "PLR09",   # we have our own complexity rules
+    # "PLR2004", # do not report magic numbers -> I do want to report magic numbers
+    "PLR6301", # do not require classmethod / staticmethod when self not used
+    "TRY003",  # long exception messages from `tryceratops`
+    # Start of own error codes
+    "ANN002", # Ignore unused *args
+    "ANN003", # Ignore unused **kwargs
+    "D107", # Allow undocumented __init__
+    "TC001", # Move to type checking block (does not play nice with pydantic models)
+    "TC002", # Move to type checking block (does not play nice with pydantic models)
+    "CPY001",
+]
+
+# Ignores S101 ("Use of 'assert' detected") for the tests.
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ANN201", "SLF001", "S106", "S105", "S311", "PLR2004", "PT018"]
+"examples/**" = ["EXE001", "T201", "S311", "S105", "INP001", "SLF001"]

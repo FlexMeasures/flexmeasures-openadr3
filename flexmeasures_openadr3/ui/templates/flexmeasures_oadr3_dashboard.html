@@ -1,0 +1,67 @@
+{% extends "base_flexmeasures_openadr3.html" %}
+
+{% set active_page = "flexmeasures-openadr3/dashboard"  %}
+
+{% block title %} The flexmeasures-openadr3 dashboard {% endblock %}
+
+
+{% block divs %}
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">OpenADR 3 Dashboard</h2>
+    <a href="{{ url_for('.ven_client_new') }}" class="btn btn-primary">Add new VEN client</a>
+  </div>
+
+  <div class="alert alert-light border mb-4" role="note">
+    <strong>VEN clients</strong> represent the static connection settings that a Virtual End Node (VEN)
+    needs to communicate with a Virtual Top Node (VTN) &mdash; the VTN URL, OAuth credentials, and
+    scopes. Each VEN client can have one or more <strong>polling schedules</strong> that define
+    what DR events to fetch, when to fetch them, and which FlexMeasures sensors to store the
+    retrieved capacity-limit beliefs in.
+  </div>
+
+  <div class="row g-4">
+    <div class="col-12 col-lg-12">
+      <div class="card h-100">
+        <div class="card-header">
+          <h3 class="h5 mb-0">VEN clients</h3>
+        </div>
+        <div class="card-body">
+          {% if ven_clients %}
+            {% for ven_client in ven_clients %}
+            <div class="mb-3 border rounded">
+              <div class="p-3 d-flex justify-content-between align-items-start">
+                <div>
+                  <div class="fw-semibold">
+                    <a href="{{ url_for('.ven_client_detail', ven_id=ven_client.id) }}">{{ ven_client.name }}</a>
+                  </div>
+                  <div class="text-muted small">
+                    {{ ven_client.sensor_configs | length }} polling schedule{% if ven_client.sensor_configs | length != 1 %}s{% endif %}
+                  </div>
+                </div>
+                <div class="d-flex gap-2">
+                  <a
+                    href="{{ url_for('.sensor_configs_overview', ven_id=ven_client.id) }}"
+                    class="btn btn-sm btn-outline-secondary"
+                  >
+                    Polling schedules
+                  </a>
+                  <a
+                    href="{{ url_for('.ven_client_sensor_config_new', ven_id=ven_client.id) }}"
+                    class="btn btn-sm btn-outline-primary"
+                  >
+                    Add schedule
+                  </a>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <p class="text-muted mb-0">No VEN clients defined yet. Create one to start fetching DR events from a VTN.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
