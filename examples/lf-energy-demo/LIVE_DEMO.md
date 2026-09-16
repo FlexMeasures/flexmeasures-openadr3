@@ -15,9 +15,9 @@ for those; this doc is about *what to click versus what to run*, and in what ord
 | 3 | Seed the capacity-limit event on the VTN | **[CLI]** — no UI equivalent |
 | 4 | Log in, open OpenADR 3 Configuration | **[UI]** |
 | 5 | Create the VEN client | **[UI]** |
-| 6 | Add the polling schedule | **[UI]**, then trigger the fetch | **[CLI]** — no UI trigger |
+| 6 | Add the polling schedule, then trigger the fetch | **[UI]** + **[CLI]** — no UI trigger |
 | 7 | Show the fetched OpenADR sensor values | **[UI]** |
-| 8 | Nest the VEN asset under the campus | **[CLI]** — no UI equivalent |
+| 8 | Nest the VEN asset under the campus | **[UI]** (or **[CLI]**) |
 | 9 | Wire the flex-context live | **[UI]** |
 | 10 | Trigger the after-OpenADR schedule | **[CLI]** — no UI equivalent |
 | 11 | Show the shift in power usage | **not available in the FlexMeasures UI** — custom HTML report |
@@ -86,21 +86,32 @@ Genuinely built into FlexMeasures, nothing custom here: **Polling schedules** fo
 `demo-ven` → **Import sensor** or **Export sensor** next to `demo-poll` → the sensor's
 chart/beliefs view. You should see 96 beliefs, sourced from **OpenADR 3 VTN**.
 
-## 8. Nest the VEN asset under the campus — [CLI], no UI equivalent
+## 8. Nest the VEN asset under the campus — [UI] (or [CLI])
+
+Without this step, Step 9's sensor search cannot find `demo-ven`'s sensors: FlexMeasures'
+"Edit flex-context" picker only searches an asset's own descendants, and `demo-ven` is
+otherwise created as an unrelated top-level asset.
+
+**Option A (UI) — move it live:** every asset page has a view switcher next to its
+breadcrumb (**Context** / **Graphs** / **Properties** / **Audit Log** / **Status**).
+Open `demo-ven`'s asset page — find it via **Assets** in the main nav, since the OpenADR
+plugin's own pages don't link out to it — switch to **Properties**, and in the "Edit asset" panel on
+the left set **Parent Asset Id** to `demo-campus (ID: ...)` — it appears in that dropdown
+automatically, since it's an ordinary asset-edit field listing every other asset in the
+account, not something specific to VEN clients. Click **Save**.
+
+**Option B (CLI):**
 
 ```bash
 docker compose exec server uv run --active --no-project /walkthrough/flexmeasures/seed_assets.py --skip-openadr-wiring
 ```
 
-There is no FlexMeasures UI feature to move an existing asset under a new parent, so this
-one step has to stay scripted. It nests `demo-ven` under `demo-campus` — you'll see it
-appear in `demo-campus`'s "Structure" tab from now on — and, with `--skip-openadr-wiring`,
-deliberately leaves `site-consumption-capacity`/`site-production-capacity` unset so the
-next step has something real to do.
+Nests `demo-ven` under `demo-campus` the same way, and additionally leaves
+`site-consumption-capacity`/`site-production-capacity` unset (with `--skip-openadr-wiring`)
+so Step 9 has something real to do — useful for a non-interactive run, or as a fallback if
+you'd rather not click through Option A live.
 
-(Without this nesting step, Step 9's sensor search literally cannot find `demo-ven`'s
-sensors: FlexMeasures' "Edit flex-context" picker only searches an asset's own
-descendants, and `demo-ven` is otherwise created as an unrelated top-level asset.)
+Either way, you'll see `demo-ven` appear in `demo-campus`'s "Structure" tab from now on.
 
 ## 9. Wire the flex-context live — [UI]
 
@@ -113,7 +124,14 @@ Open `demo-campus`'s asset page, **Edit flex-context**:
 3. **Save**.
 
 This is the step the whole demo has been building toward: the DR signal fetched from the
-VTN is now a real scheduling constraint, wired in without touching a script.
+VTN is now a real scheduling constraint, wired in without touching a script. It's also
+safe: the modal loads `demo-campus`'s *entire* existing flex-context (day-ahead prices,
+`site-power-capacity`, breach prices, and so on) into the editor first, and **Add field**
+only adds to that in-memory object — **Save** always PATCHes the whole thing back, so it
+cannot clobber the fields `seed_assets.py` already set. (That's not automatic if you ever
+drive the same API by hand instead of the UI — a partial `PATCH .../assets/8` with just the
+two new fields silently wipes the rest of the flex-context. The UI form doesn't have that
+failure mode.)
 
 ## 10. Trigger the after-OpenADR schedule — [CLI], no UI equivalent
 
@@ -128,6 +146,18 @@ thing. Triggering a schedule is an API call (`POST .../schedules/trigger`) plus 
 job, full stop; this script is the only way to do it in this walkthrough. It reads
 `demo-campus`'s flex-context again, finds the fields from Step 9, and labels this run
 `after-openadr`.
+
+This absence isn't specific to `demo-campus` — there is no "Trigger schedule" button on
+*any* asset's page, campus or child. You also don't need one: triggering the top-level
+`demo-campus` already schedules the whole hierarchy in one pass. The script's own output
+shows this — one trigger call produces a plan for the campus's own grid connection *and*
+its children:
+
+```
+Campus grid connection: 96 values on demo-campus/power
+EVSE charging hub: 96 values on demo-evse-hub/power
+Office heat pump: 96 values on demo-office-heat-pump/power
+```
 
 ## 11. Show the shift in power usage — not available in the FlexMeasures UI
 
