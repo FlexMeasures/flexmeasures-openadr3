@@ -89,7 +89,7 @@ class VenAssetRepository:
         asset = GenericAsset(
             name=asset_name,
             generic_asset_type_id=asset_type.id,
-            account_id=current_user.id,
+            account_id=current_user.account_id,
         )
         db.session.add(asset)
         db.session.flush()
