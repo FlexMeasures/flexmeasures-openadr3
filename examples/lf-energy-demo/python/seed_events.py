@@ -25,6 +25,7 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -32,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from event_diagram import render_html
 from openadr3_client._models.common.interval_period import IntervalPeriod
 from openadr3_client.bl.http_factory import BusinessLogicHttpClientFactory
 from openadr3_client.oadr310._bl.client import BusinessLogicClient
@@ -129,6 +131,10 @@ SCHEDULE_HORIZON = timedelta(hours=24)
 
 # Shortest notice the curtailment is ever given, for the fallback below.
 MINIMUM_NOTICE = timedelta(minutes=30)
+
+# Where the provisioned-payloads diagram is written, alongside compare_schedules.py's own
+# output in the same (gitignored) directory.
+EVENT_DIAGRAM_PATH = Path(__file__).resolve().parent.parent / "schedule-runs" / "event.html"
 
 
 def create_bl_client() -> BusinessLogicClient:
@@ -327,11 +333,12 @@ def main() -> None:
         print(f"  Last interval start  (UTC): {last_start.isoformat()}")
     local_start = curtailment_start.astimezone(ZoneInfo(SITE_TIMEZONE))
     local_end = (curtailment_start + CURTAILMENT_DURATION).astimezone(ZoneInfo(SITE_TIMEZONE))
-    print(
-        f"  Import capacity is {UNCONSTRAINED_CAPACITY_LIMIT:.0f} kW, dropping to {CURTAILED_CAPACITY_LIMIT:.0f} kW "
-        f"from {curtailment_start.isoformat()} for {CURTAILMENT_DURATION}."
+    curtailment_summary = (
+        f"Import capacity is {UNCONSTRAINED_CAPACITY_LIMIT:.0f} kW, dropping to {CURTAILED_CAPACITY_LIMIT:.0f} kW "
+        f"from {curtailment_start.isoformat()} for {CURTAILMENT_DURATION} "
+        f"({local_start:%a %H:%M} to {local_end:%H:%M} local time, {SITE_TIMEZONE})."
     )
-    print(f"  That is {local_start:%a %H:%M} to {local_end:%H:%M} local time ({SITE_TIMEZONE}).")
+    print(f"  {curtailment_summary}")
     if gave_short_notice:
         print(
             f"  Note: the pinned {CURTAILMENT_START_HOUR:02.0f}:00-{CURTAILMENT_START_HOUR + CURTAILMENT_DURATION / timedelta(hours=1):02.0f}:00 "
@@ -340,6 +347,14 @@ def main() -> None:
             "so the comparison still has something to show; the window simply runs on into the evening rather than "
             "stopping at closing time."
         )
+
+    print("\nEvent JSON (as sent to the VTN):")
+    print(json.dumps(event.model_dump(mode="json", by_alias=True), indent=2))
+
+    EVENT_DIAGRAM_PATH.parent.mkdir(parents=True, exist_ok=True)
+    EVENT_DIAGRAM_PATH.write_text(render_html(event, ZoneInfo(SITE_TIMEZONE), subtitle=curtailment_summary))
+    print(f"\nWrote provisioned-payloads diagram to {EVENT_DIAGRAM_PATH}")
+
     print("Next: configure the VEN client and polling schedule in the FlexMeasures UI.")
 
 

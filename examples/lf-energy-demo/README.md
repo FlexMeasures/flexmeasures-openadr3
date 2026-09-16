@@ -39,6 +39,9 @@ all three automatically; if a triggered schedule sits `QUEUED` forever, it's usu
 - Docker and Docker Compose
 - [uv](https://docs.astral.sh/uv/) (for running the Python scripts, on your host and inside the container)
 
+Presenting this live? [`LIVE_DEMO.md`](LIVE_DEMO.md) reorders these steps to do as much as
+possible in the FlexMeasures UI, with each step tagged as UI or CLI.
+
 ---
 
 ## Step 1 — Start the stack
@@ -342,16 +345,38 @@ docker compose exec server uv run --active --no-project /walkthrough/flexmeasure
 The asset hierarchy itself is unchanged by a re-run, but the script always re-evaluates the
 OpenADR wiring: it points `demo-campus`'s `site-consumption-capacity` and
 `site-production-capacity` flex-context fields at the import/export sensors it finds, turning
-the fetched DR signal into an actual scheduling constraint. Its summary line reports what it
-wired, e.g.:
+the fetched DR signal into an actual scheduling constraint. It also nests `demo-ven` under
+`demo-campus` in the asset tree — harmless to the schedule itself (FlexMeasures only pulls a
+descendant into scheduling if that asset has its own flex-model, which the VEN asset never
+sets), but it's now what makes `demo-campus`'s **Edit flex-context** sensor search able to
+find the VEN's sensors at all, since that search only looks at an asset's own descendants.
+You'll see `demo-ven` appear inside `demo-campus`'s "Structure" tab in the UI from now on —
+that's expected. The script's summary line reports both outcomes, e.g.:
 
 ```
+OpenADR VEN asset: nested 'demo-ven' under 'demo-campus'
 OpenADR site capacity limits: site-consumption-capacity -> import-capacity-limit-demo-poll, site-production-capacity -> export-capacity-limit-demo-poll
 ```
 
 If you run this before the VEN client or polling schedule exist (or before Step 2), it
 reports the wiring as `not wired: …` instead of failing — that's expected until you reach
 this step.
+
+**Wiring it live through the UI instead:** pass `--skip-openadr-wiring` to still nest
+`demo-ven` under `demo-campus` but leave both flex-context fields blank:
+
+```bash
+docker compose exec server uv run --active --no-project /walkthrough/flexmeasures/seed_assets.py --skip-openadr-wiring
+```
+
+Then, in the FlexMeasures UI, open `demo-campus`'s asset page and click **Edit
+flex-context**:
+
+1. Select `site-consumption-capacity` from the field dropdown, click **Add field**, then
+   search for and pick `import-capacity-limit-demo-poll`.
+2. Select `site-production-capacity`, click **Add field**, then search for and pick
+   `export-capacity-limit-demo-poll`.
+3. Click **Save**.
 
 ---
 

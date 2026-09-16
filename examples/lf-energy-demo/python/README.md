@@ -13,12 +13,18 @@ Scripts for the [capacity-limits walkthrough](../README.md). `seed_events.py` an
 | `flexmeasures_client.py` | — | — | REST client for the walkthrough's FlexMeasures instance |
 | `schedule_comparison.py` | — | — | The saved-run file format and the before/after arithmetic |
 | `comparison_diagram.py` | — | — | Renders a comparison as the self-contained `comparison.html` diagram |
+| `event_diagram.py` | — | — | Renders a seeded event as the self-contained `event.html` diagram |
 
 `seed_events.py` and `compare_schedules.py` declare their dependencies inline (PEP 723)
 and uv resolves them into an isolated, cached environment on first run.
 `trigger_fetch.py` instead reuses the FlexMeasures container's own uv-managed venv
 (`/app/.venv`), since it needs the `flexmeasures` and `flexmeasures_openadr3` packages
 already installed there.
+
+`seed_events.py` prints the created event's JSON (as sent to the VTN) and writes
+`../schedule-runs/event.html` — a self-contained page with one inline SVG panel per
+payload type the event carries (`IMPORT_CAPACITY_LIMIT` and `EXPORT_CAPACITY_LIMIT`),
+drawn by `event_diagram.py`.
 
 Run `compare_schedules.py` twice: once right after seeding forecasts and before any
 OpenADR wiring exists (walkthrough Step 4), and once again after the OpenADR capacity

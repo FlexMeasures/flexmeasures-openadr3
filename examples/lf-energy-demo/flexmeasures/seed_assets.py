@@ -97,6 +97,7 @@ class SeedReport:
     existing_assets: list[str] = field(default_factory=list)
     created_sensors: list[str] = field(default_factory=list)
     existing_sensors: list[str] = field(default_factory=list)
+    openadr_nesting: str | None = None
     openadr_wiring: str | None = None
 
     def record_asset(self, asset: GenericAsset, *, was_created: bool) -> None:
@@ -613,6 +614,31 @@ def find_openadr_capacity_sensors(report: SeedReport) -> dict[str, Sensor]:
     return found
 
 
+def nest_ven_asset_under_campus(campus: GenericAsset, report: SeedReport) -> None:
+    """
+    Move the VEN client asset into demo-campus's own asset tree, if one exists.
+
+    FlexMeasures' "Edit flex-context" sensor picker (the UI form for
+    site-consumption-capacity/site-production-capacity) only searches an asset's
+    descendants, so a VEN client left as its own top-level asset can never be found
+    there. Nesting it here is what makes wiring those fields through the UI possible at
+    all, rather than only through this script.
+
+    :param campus:  Top-level site asset to nest the VEN client asset under.
+    :param report:  Run report to record the outcome in.
+    """
+    ven_client = VenClientRepository().find_by_name(VEN_CLIENT_NAME)
+    if ven_client is None:
+        report.openadr_nesting = f"not nested: no VEN client '{VEN_CLIENT_NAME}' configured yet"
+        return
+    if ven_client.asset.parent_asset_id == campus.id:
+        report.openadr_nesting = f"'{VEN_CLIENT_NAME}' already nested under '{campus.name}'"
+        return
+    ven_client.asset.parent_asset_id = campus.id
+    db.session.flush()
+    report.openadr_nesting = f"nested '{VEN_CLIENT_NAME}' under '{campus.name}'"
+
+
 def wire_openadr_capacity_limits(campus: GenericAsset, report: SeedReport) -> list[Sensor]:
     """
     Point the site's capacity limits at the OpenADR sensors, or clear them when absent.
@@ -682,6 +708,7 @@ def print_summary(report: SeedReport, campus: GenericAsset) -> None:
         print(f"  + sensor {name}")
     for name in report.existing_assets:
         print(f"  = asset  {name}")
+    print(f"OpenADR VEN asset: {report.openadr_nesting}")
     print(f"OpenADR site capacity limits: {report.openadr_wiring}")
     print(f"Next: open {FLEXMEASURES_URL}/assets/{campus.id} to inspect the hierarchy.")
 
@@ -693,6 +720,15 @@ def main() -> None:
         "--account-name",
         default=ACCOUNT_NAME,
         help=f"Account to own the demo assets (default: {ACCOUNT_NAME})",
+    )
+    parser.add_argument(
+        "--skip-openadr-wiring",
+        action="store_true",
+        help=(
+            "Nest the VEN client asset under the campus, but leave "
+            "site-consumption-capacity/site-production-capacity unset -- for wiring "
+            "them live via demo-campus's 'Edit flex-context' UI instead."
+        ),
     )
     args = parser.parse_args()
 
@@ -706,7 +742,12 @@ def main() -> None:
         campus, campus_power = build_campus(builder, price_sensor)
         _, hub_power = build_evse_hub(builder, campus)
         _, office_power = build_office(builder, campus)
-        capacity_sensors = wire_openadr_capacity_limits(campus, builder.report)
+        nest_ven_asset_under_campus(campus, builder.report)
+        if args.skip_openadr_wiring:
+            capacity_sensors = []
+            builder.report.openadr_wiring = "skipped (--skip-openadr-wiring); wire it via demo-campus's 'Edit flex-context' UI"
+        else:
+            capacity_sensors = wire_openadr_capacity_limits(campus, builder.report)
         set_campus_dashboard(campus, [campus_power, hub_power, office_power], capacity_sensors)
 
         validate_flex_metadata(builder.assets)
