@@ -23,10 +23,14 @@ pytest_plugins = [
 
 
 @pytest.fixture(scope="session")
-def integration_test_flexmeasures_postgres() -> Iterator[FlexMeasuresTestPostgres]:
+def integration_test_flexmeasures_postgres(request: pytest.FixtureRequest) -> FlexMeasuresTestPostgres:
     """Session-scoped PostgreSQL testcontainer for FlexMeasures during integration tests."""
-    with FlexMeasuresTestPostgresContainer() as postgres_container:
-        yield postgres_container.get_connection_info()
+    postgres_container = FlexMeasuresTestPostgresContainer().start()
+    # flexmeasures.conftest drops its test schema in a config cleanup, which runs after the session fixtures
+    # are torn down. Cleanups run last-in, first-out, so stopping the container in one registered before
+    # the schema exists keeps the database up until the schema is dropped.
+    request.config.add_cleanup(postgres_container.stop)
+    return postgres_container.get_connection_info()
 
 
 @pytest.fixture(scope="session")
