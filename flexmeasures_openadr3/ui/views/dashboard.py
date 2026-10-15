@@ -1,6 +1,6 @@
 from typing import cast
 
-from flask import abort, current_app, flash, redirect, request, url_for
+from flask import abort, flash, redirect, request, url_for
 from flask_login import login_required
 from flexmeasures.data import db
 from flexmeasures.ui.utils.view_utils import render_flexmeasures_template
@@ -14,7 +14,6 @@ from flexmeasures_openadr3.utils.ven_client_forms import (
     validate_ven_client_form,
 )
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import notify_cron_resync
 
 
 def _require_validated_data[T](data: T | None) -> T:
@@ -137,7 +136,7 @@ def ven_client_update(ven_id: int) -> str | Response:
 @flexmeasures_openadr3_ui_bp.route("/ven-clients/<int:ven_id>/delete", methods=["POST"])
 @login_required
 def ven_client_delete(ven_id: int) -> Response:
-    """Delete a VEN client and all its scheduled fetch jobs."""
+    """Delete a VEN client and all its polling schedules."""
     ven_client_repository = _build_repository()
     ven_client = ven_client_repository.find_by_id(ven_id)
     if ven_client is None:
@@ -145,6 +144,5 @@ def ven_client_delete(ven_id: int) -> Response:
 
     ven_client_repository.delete(ven_client)
     db.session.commit()
-    notify_cron_resync(current_app.redis_connection)
     flash(f"VEN client '{ven_client.name}' deleted.")
     return redirect(url_for(".dashboard"))

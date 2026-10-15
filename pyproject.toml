@@ -21,9 +21,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
-version = "1.0"
+version = "2.0"
 dependencies = [
-    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets)
+    "flexmeasures>=1.1.0.dev0", # introduces plugin-defined automations
     "openadr3-client>=2.1.0",
 ]
 
@@ -41,6 +41,10 @@ include = [
 ]
 
 # UV-specific configuration
+[tool.uv.sources]
+# Plugin-defined automations are not in a FlexMeasures release yet.
+flexmeasures = { git = "https://github.com/FlexMeasures/flexmeasures", branch = "main" }
+
 [tool.uv]
 environments = [
     "sys_platform == 'darwin'",
@@ -77,6 +81,10 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = ["--import-mode=importlib"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [tool.mypy]
 python_version = "3.12"
 packages = ["flexmeasures_openadr3"]
@@ -86,7 +94,7 @@ warn_return_any = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["flask_login.*", "flexmeasures.*", "tests.*", "testcontainers.*", "settings"]
+module = ["flask_login.*", "flexmeasures.*", "timely_beliefs.*", "tests.*", "testcontainers.*", "settings"]
 ignore_missing_imports = true
 disallow_untyped_defs = false
 

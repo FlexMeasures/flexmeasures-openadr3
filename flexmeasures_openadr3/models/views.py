@@ -11,7 +11,11 @@ class VenSensorConfigOverview:
     ven_name: str
     config_name: str
     targets: tuple[str, ...]
-    utc_trigger_time: str
+    automation_id: int
+    cronstr: str
+    schedule_description: str
+    timezone: str
+    active: bool
     fetch_import_capacity_limits: bool
     fetch_export_capacity_limits: bool
     import_sensor_id: int | None

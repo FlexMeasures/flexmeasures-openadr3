@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from flask_login import current_user
@@ -12,6 +11,7 @@ from flexmeasures.data.models.generic_assets import GenericAsset, GenericAssetTy
 from flexmeasures.data.models.time_series import Sensor, TimedBelief
 from flexmeasures.utils.time_utils import get_timezone
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import JSONPATH
 from sqlalchemy.exc import IntegrityError
 
 from flexmeasures_openadr3.utils.sensor_ref_pruning import (
@@ -21,9 +21,6 @@ from flexmeasures_openadr3.utils.sensor_ref_pruning import (
     _prune_sensors_to_show_refs,
 )
 
-if TYPE_CHECKING:
-    from flexmeasures_openadr3.utils.ven_clients import VenSensorConfig
-
 IMPORT_CAPACITY_LIMIT_SENSOR_NAME = "import-capacity-limit"
 EXPORT_CAPACITY_LIMIT_SENSOR_NAME = "export-capacity-limit"
 
@@ -31,6 +28,11 @@ VEN_ASSET_TYPE_NAME = "OpenADR VEN"
 VEN_ASSET_TYPE_DESCRIPTION = "OpenADR Virtual End Node for demand response signals"
 VEN_SENSOR_UNIT = "kW"
 VEN_SENSOR_EVENT_RESOLUTION = timedelta(minutes=15)
+
+
+def _jsonpath(path: str) -> sa.Cast[str]:
+    """Bind a JSON path as such; psycopg 3 would otherwise send it as a varchar, which jsonb_path_exists does not accept."""
+    return sa.cast(path, JSONPATH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +51,9 @@ class VenAssetRepository:
         Return the OpenADR VEN asset type, creating it if needed.
 
         Commits immediately rather than relying on the caller to commit or roll
-        back: this is also called from long-lived processes (the cron-scheduler
-        CLI command and its resync thread) whose app context is never torn down,
-        so an uncommitted insert here would hold its unique-name lock forever and
-        block every other process trying to read-or-create the same row.
+        back: an uncommitted insert here would hold its unique-name lock until
+        the caller's transaction ends, blocking every other process (web
+        requests, workers) trying to read-or-create the same row meanwhile.
         """
         asset_type = db.session.execute(select(GenericAssetType).filter_by(name=VEN_ASSET_TYPE_NAME)).scalar_one_or_none()
         if asset_type is not None:
@@ -128,37 +129,37 @@ class VenSensorRepository:
                 sa.or_(
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_model,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_context,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_context,
-                        '$."inflexible-device-sensors"[*] ? (@ == $sid)',
+                        _jsonpath('$."inflexible-device-sensors"[*] ? (@ == $sid)'),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$.**.sensors[*] ? (@ == $sid)",
+                        _jsonpath("$.**.sensors[*] ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$[*] ? (@ == $sid)",
+                        _jsonpath("$[*] ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show_as_kpis,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                 )
@@ -244,36 +245,36 @@ class VenSensorRepository:
         """Return the FlexMeasures sensor name for export capacity limits."""
         return f"{EXPORT_CAPACITY_LIMIT_SENSOR_NAME}-{config_name}"
 
-    def resolve_sensors_for_config(self, asset: GenericAsset, sensor_config: VenSensorConfig) -> VenSensorPair:
-        """Find existing sensors for a config without creating them."""
+    def ensure_sensors_for_config(
+        self,
+        asset: GenericAsset,
+        config_name: str,
+        *,
+        fetch_import_capacity_limits: bool,
+        fetch_export_capacity_limits: bool,
+        existing: VenSensorPair | None = None,
+    ) -> VenSensorPair:
+        """Get or create the sensors required by a config, preferring the sensors it already records on."""
+        existing = existing or VenSensorPair(import_sensor=None, export_sensor=None)
         import_sensor = None
         export_sensor = None
 
-        if sensor_config.fetch_import_capacity_limits:
-            import_sensor = self.find_sensor(self.import_sensor_name(sensor_config.name), asset)
-        if sensor_config.fetch_export_capacity_limits:
-            export_sensor = self.find_sensor(self.export_sensor_name(sensor_config.name), asset)
+        if fetch_import_capacity_limits:
+            import_sensor = existing.import_sensor or self.get_or_create_sensor(self.import_sensor_name(config_name), asset)
+        if fetch_export_capacity_limits:
+            export_sensor = existing.export_sensor or self.get_or_create_sensor(self.export_sensor_name(config_name), asset)
 
         return VenSensorPair(import_sensor=import_sensor, export_sensor=export_sensor)
 
-    def ensure_sensors_for_config(self, asset: GenericAsset, sensor_config: VenSensorConfig) -> VenSensorPair:
-        """Get or create the sensors required by a config."""
-        import_sensor = None
-        export_sensor = None
-
-        if sensor_config.fetch_import_capacity_limits:
-            import_sensor = self.get_or_create_sensor(self.import_sensor_name(sensor_config.name), asset)
-        if sensor_config.fetch_export_capacity_limits:
-            export_sensor = self.get_or_create_sensor(self.export_sensor_name(sensor_config.name), asset)
-
-        return VenSensorPair(import_sensor=import_sensor, export_sensor=export_sensor)
-
-    def delete_sensors_for_config(self, asset: GenericAsset, config_name: str) -> None:
-        """Delete both import and export sensors associated with a config name."""
+    def delete_sensors_for_config(self, asset: GenericAsset, config_name: str, sensors: VenSensorPair) -> None:
+        """Delete the sensors a config records on, and any import and export sensors still named after it."""
+        to_delete = {sensor.id: sensor for sensor in (sensors.import_sensor, sensors.export_sensor) if sensor is not None}
         for sensor_name in (
             self.import_sensor_name(config_name),
             self.export_sensor_name(config_name),
         ):
             sensor = self.find_sensor(sensor_name, asset)
             if sensor is not None:
-                self._delete_sensor(sensor)
+                to_delete[sensor.id] = sensor
+        for sensor in to_delete.values():
+            self._delete_sensor(sensor)

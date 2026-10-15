@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,13 +12,11 @@ from flask_login import login_user
 from flask_sqlalchemy import SQLAlchemy
 from flexmeasures.data.models.user import User
 from openadr3_client.oadr310.models.event.event import ExistingEvent
-from rq.cron import CronScheduler
 from testcontainers.core.network import Network
 from testcontainers.keycloak import KeycloakContainer
 
 from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
 from flexmeasures_openadr3.utils.ven_clients import VenClient, VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import VenFetchJobScheduler
 from tests.test_container.integration_types import (
     IntegrationTestVTNClient,
     IntegrationTestVTNServer,
@@ -74,7 +71,7 @@ OPENLEADR_RS_VEN_SCOPES = [
 
 
 @pytest.fixture
-def clean_forecasting_queue(app: Flask) -> Iterator[None]:
+def clean_queues(app: Flask) -> Iterator[None]:
     """Reset the test Redis DB without queue.empty() (fakeredis lacks EVALSHA)."""
     app.redis_connection.flushdb()
     yield
@@ -85,15 +82,6 @@ def clean_forecasting_queue(app: Flask) -> Iterator[None]:
 def ven_client_repository() -> VenClientRepository:
     """Repository bound to the current app and database session."""
     return VenClientRepository()
-
-
-@pytest.fixture
-def ven_fetch_job_scheduler(
-    app: Flask,
-    ven_client_repository: VenClientRepository,
-) -> VenFetchJobScheduler:
-    """RQ job scheduler backed by a fresh CronScheduler, as the dedicated cron-scheduler process builds one."""
-    return VenFetchJobScheduler(ven_client_repository, cron_scheduler=CronScheduler(connection=app.redis_connection))
 
 
 @pytest.fixture
@@ -115,7 +103,8 @@ def sample_sensor_config_form_data() -> VenSensorConfigFormData:
     return VenSensorConfigFormData(
         name="daily-poll",
         targets=["target-a", "target-b"],
-        utc_trigger_time=time.fromisoformat("02:30:00"),
+        cronstr="30 2 * * *",
+        timezone="Europe/Amsterdam",
         fetch_import_capacity_limits=True,
         fetch_export_capacity_limits=True,
     )

@@ -1,8 +1,9 @@
 from typing import cast
 
-from flask import abort, current_app, flash, redirect, request, url_for
+from flask import abort, flash, redirect, request, url_for
 from flask_login import login_required
 from flexmeasures.data import db
+from flexmeasures.data.services.automations import describe_cronstr
 from flexmeasures.ui.utils.view_utils import render_flexmeasures_template
 from werkzeug.wrappers import Response
 
@@ -11,11 +12,6 @@ from flexmeasures_openadr3.models.forms import FormValidationErrors, VenSensorCo
 from flexmeasures_openadr3.models.views import VenSensorConfigOverview
 from flexmeasures_openadr3.utils.ven_client_forms import build_ven_sensor_config_form_values, validate_ven_sensor_config_form
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import notify_cron_resync
-
-_HOUR_MINUTE_COMPONENT_COUNT = 2
-_MAX_HOUR = 23
-_MAX_MINUTE = 59
 
 
 def _require_validated_data[T](data: T | None) -> T:
@@ -31,29 +27,12 @@ def _build_repository() -> VenClientRepository:
     return VenClientRepository()
 
 
-def _utc_trigger_time_from_request(raw: str) -> str:
-    """
-    Normalize HTML time input values to HH:MM:SS for validation.
-
-    Browsers may submit HH:MM when seconds are zero; the form validator
-    expects three colon-separated parts.
-    """
-    stripped = raw.strip()
-    if not stripped:
-        return ""
-    parts = stripped.split(":")
-    if len(parts) == _HOUR_MINUTE_COMPONENT_COUNT and all(p.isdigit() for p in parts):
-        hour, minute = int(parts[0]), int(parts[1])
-        if 0 <= hour <= _MAX_HOUR and 0 <= minute <= _MAX_MINUTE:
-            return f"{hour:02d}:{minute:02d}:00"
-    return stripped
-
-
 def _sensor_config_post_values_from_request() -> VenSensorConfigPostValues:
     return VenSensorConfigPostValues(
         name=request.form.get("name", "").strip(),
         targets=request.form.get("targets", "").strip(),
-        utc_trigger_time=_utc_trigger_time_from_request(request.form.get("utc_trigger_time", "")),
+        cronstr=request.form.get("cronstr", "").strip(),
+        timezone=request.form.get("timezone", "").strip(),
         fetch_import_capacity_limits=request.form.get("fetch_import_capacity_limits") == "on",
         fetch_export_capacity_limits=request.form.get("fetch_export_capacity_limits") == "on",
     )
@@ -74,7 +53,11 @@ def sensor_configs_overview(ven_id: int) -> str:
             ven_name=ven_client.name,
             config_name=cfg.name,
             targets=tuple(cfg.targets),
-            utc_trigger_time=cfg.utc_trigger_time.isoformat() if cfg.utc_trigger_time else "",
+            automation_id=cfg.automation.id,
+            cronstr=cfg.cronstr,
+            schedule_description=describe_cronstr(cfg.cronstr),
+            timezone=cfg.timezone,
+            active=cfg.active,
             fetch_import_capacity_limits=cfg.fetch_import_capacity_limits,
             fetch_export_capacity_limits=cfg.fetch_export_capacity_limits,
             import_sensor_id=cfg.import_sensor.id if cfg.import_sensor else None,
@@ -132,7 +115,6 @@ def ven_client_sensor_config_create(ven_id: int) -> str | Response:
             _require_validated_data(validation.data),
         )
         db.session.commit()
-        notify_cron_resync(current_app.redis_connection)
         flash(f"Polling schedule added for VEN client '{ven_client.name}'.")
         return redirect(url_for(".dashboard"))
 
@@ -167,7 +149,6 @@ def ven_client_sensor_config_delete(ven_id: int, config_name: str) -> Response:
 
     ven_client_repository.delete_sensor_config(ven_client, config_name)
     db.session.commit()
-    notify_cron_resync(current_app.redis_connection)
     flash(f"Polling schedule '{config_name}' deleted.")
     return redirect(url_for(".sensor_configs_overview", ven_id=ven_id))
 
@@ -240,7 +221,6 @@ def ven_client_sensor_config_update(ven_id: int, config_name: str) -> str | Resp
             _require_validated_data(validation.data),
         )
         db.session.commit()
-        notify_cron_resync(current_app.redis_connection)
         flash(f"Polling schedule updated for VEN client '{ven_client.name}'.")
         return redirect(url_for(".dashboard"))
 

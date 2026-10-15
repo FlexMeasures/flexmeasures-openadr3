@@ -8,7 +8,7 @@ Scripts for the [capacity-limits walkthrough](../README.md). `seed_events.py` an
 | --- | --- | --- | --- |
 | `seed_events.py` | Host machine | `uv run seed_events.py` | Create a 24h capacity-limit event on the VTN (BL OAuth client) |
 | `compare_schedules.py` | Host machine | `uv run compare_schedules.py` | Trigger a `demo-campus` schedule and compare it with the other side of the OpenADR wiring |
-| `trigger_fetch.py` | FlexMeasures container | `uv run --active --no-project trigger_fetch.py` | Run the fetch job immediately for `demo-ven` / `demo-poll` |
+| `trigger_fetch.py` | FlexMeasures container | `uv run --active --no-project trigger_fetch.py` | Queue a run of the `demo-poll` automation for `demo-ven` and wait for the `worker` to finish it |
 | `settings.py` | — | — | Shared URLs and form values |
 | `flexmeasures_client.py` | — | — | REST client for the walkthrough's FlexMeasures instance |
 | `schedule_comparison.py` | — | — | The saved-run file format and the before/after arithmetic |

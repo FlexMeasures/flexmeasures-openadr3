@@ -1,0 +1,9 @@
+.venv/
+.git/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+**/__pycache__/
+flexmeasures-instance/
+examples/*/fm-walkthrough-instance/
+docker-compose-data/

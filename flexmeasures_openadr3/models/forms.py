@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import time
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
 ValidatedDataT = TypeVar("ValidatedDataT")
+
+DEFAULT_POLLING_TIMEZONE = "UTC"
 
 
 @dataclass
@@ -96,7 +97,8 @@ class VenSensorConfigFormValues:
 
     name: str = ""
     targets: str = ""
-    utc_trigger_time: time | None = None
+    cronstr: str = ""
+    timezone: str = DEFAULT_POLLING_TIMEZONE
     fetch_import_capacity_limits: str = ""
     fetch_export_capacity_limits: str = ""
 
@@ -108,14 +110,11 @@ class VenSensorConfigFormValues:
     @classmethod
     def from_post_values(cls, post_values: VenSensorConfigPostValues) -> VenSensorConfigFormValues:
         """Build display form values from validated POST data."""
-        try:
-            parsed_time: time | None = time.fromisoformat(post_values.utc_trigger_time)
-        except (ValueError, AttributeError):
-            parsed_time = None
         return cls(
             name=post_values.name,
             targets=post_values.targets,
-            utc_trigger_time=parsed_time,
+            cronstr=post_values.cronstr,
+            timezone=post_values.timezone,
             fetch_import_capacity_limits="on" if post_values.fetch_import_capacity_limits else "",
             fetch_export_capacity_limits="on" if post_values.fetch_export_capacity_limits else "",
         )
@@ -127,7 +126,8 @@ class VenSensorConfigPostValues:
 
     name: str
     targets: str
-    utc_trigger_time: str
+    cronstr: str
+    timezone: str
     fetch_import_capacity_limits: bool
     fetch_export_capacity_limits: bool
 
@@ -136,7 +136,8 @@ class VenSensorConfigPostValues:
         return {
             "name": self.name,
             "targets": self.targets,
-            "utc_trigger_time": self.utc_trigger_time,
+            "cronstr": self.cronstr,
+            "timezone": self.timezone,
             "fetch_import_capacity_limits": self.fetch_import_capacity_limits,
             "fetch_export_capacity_limits": self.fetch_export_capacity_limits,
         }
