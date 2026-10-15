@@ -12,6 +12,7 @@ from flexmeasures.data.models.generic_assets import GenericAsset, GenericAssetTy
 from flexmeasures.data.models.time_series import Sensor, TimedBelief
 from flexmeasures.utils.time_utils import get_timezone
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import JSONPATH
 from sqlalchemy.exc import IntegrityError
 
 from flexmeasures_openadr3.utils.sensor_ref_pruning import (
@@ -31,6 +32,11 @@ VEN_ASSET_TYPE_NAME = "OpenADR VEN"
 VEN_ASSET_TYPE_DESCRIPTION = "OpenADR Virtual End Node for demand response signals"
 VEN_SENSOR_UNIT = "kW"
 VEN_SENSOR_EVENT_RESOLUTION = timedelta(minutes=15)
+
+
+def _jsonpath(path: str) -> sa.Cast[str]:
+    """Bind a JSON path as such; psycopg 3 would otherwise send it as a varchar, which jsonb_path_exists does not accept."""
+    return sa.cast(path, JSONPATH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,37 +134,37 @@ class VenSensorRepository:
                 sa.or_(
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_model,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_context,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.flex_context,
-                        '$."inflexible-device-sensors"[*] ? (@ == $sid)',
+                        _jsonpath('$."inflexible-device-sensors"[*] ? (@ == $sid)'),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$.**.sensors[*] ? (@ == $sid)",
+                        _jsonpath("$.**.sensors[*] ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show,
-                        "$[*] ? (@ == $sid)",
+                        _jsonpath("$[*] ? (@ == $sid)"),
                         vars_json,
                     ),
                     sa.func.jsonb_path_exists(
                         GenericAsset.sensors_to_show_as_kpis,
-                        "$.**.sensor ? (@ == $sid)",
+                        _jsonpath("$.**.sensor ? (@ == $sid)"),
                         vars_json,
                     ),
                 )
