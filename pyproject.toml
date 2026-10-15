@@ -81,6 +81,10 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = ["--import-mode=importlib"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
 [tool.mypy]
 python_version = "3.12"
 packages = ["flexmeasures_openadr3"]
