@@ -21,7 +21,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
-version = "1.0"
+version = "2.0"
 dependencies = [
     "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets)
     "openadr3-client>=2.1.0",

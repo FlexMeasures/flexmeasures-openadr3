@@ -13,7 +13,7 @@ from flexmeasures_openadr3.cli import oadr3_run_cron_scheduler
 
 from .utils.blueprints import ensure_bp_routes_are_loaded_fresh
 
-__version__ = "0.1"
+__version__ = "2.0"
 
 
 """
