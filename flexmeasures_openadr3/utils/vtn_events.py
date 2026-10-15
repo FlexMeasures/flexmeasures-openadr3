@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import timely_beliefs as tb
@@ -49,12 +49,20 @@ class PayloadTypeSensorMapping:
         return self.import_sensor is not None or self.export_sensor is not None
 
 
+def _as_utc(moment: datetime) -> datetime:
+    """Express a moment from the VTN in UTC, reading one without a UTC offset as UTC."""
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC)
+
+
 def _get_interval_period(event: ExistingEvent, interval: Interval) -> tuple[datetime, datetime]:
     interval_period = interval.interval_period or event.interval_period
     if interval_period is None:
         msg = f"OpenADR event '{event.id}' interval '{interval.id}' has no interval period."
         raise ValueError(msg)
-    return interval_period.start, interval_period.start + interval_period.duration
+    start = _as_utc(interval_period.start)
+    return start, start + interval_period.duration
 
 
 def _iter_sensor_event_starts(start: datetime, end: datetime, event_resolution: timedelta) -> Iterator[datetime]:
@@ -119,7 +127,7 @@ def event_payloads_to_beliefs(
     """Turn the payloads of OpenADR events into beliefs, per sensor they are to be recorded on."""
     beliefs: dict[Sensor, list[tb.TimedBelief]] = {}
     for event in events:
-        belief_time = event.modification_date_time
+        belief_time = _as_utc(event.modification_date_time)
         for interval in event.intervals or ():
             start, end = _get_interval_period(event, interval)
             for payload in interval.payloads:
