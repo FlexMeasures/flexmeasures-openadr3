@@ -19,7 +19,8 @@
           <p class="text-muted mb-3">
             Configure when to poll the VTN for DR events, which targets to filter on, and
             which capacity-limit types to retrieve. A FlexMeasures sensor is created automatically
-            for each selected limit type to store the retrieved beliefs.
+            for each selected limit type to store the retrieved beliefs. The schedule is stored as a
+            FlexMeasures automation on the VEN client's asset.
           </p>
           <form method="post" action="{{ form_action }}">
             <div class="row g-3">
@@ -56,18 +57,39 @@
               </div>
 
               <div class="col-12">
-                <label for="utc_trigger_time" class="form-label">
+                <label for="cronstr" class="form-label">
                   <span class="field-label-with-help">
-                    Daily trigger time (UTC)
+                    Schedule (cron expression)
                     <span class="field-help-icon-wrapper">
-                      <span class="field-help-icon" tabindex="0" aria-label="Daily trigger time field info">i</span>
-                      <span class="field-help-tooltip">Time in UTC when the daily job should run which retrieves DR events from the VTN. Stored as HH:MM:SS.</span>
+                      <span class="field-help-icon" tabindex="0" aria-label="Schedule field info">i</span>
+                      <span class="field-help-tooltip">Use five fields: minute, hour, day of month, month, day of week. 0 6 * * * runs daily at 06:00; */15 * * * * runs every 15 minutes. Times use the timezone below.</span>
                     </span>
                   </span>
                 </label>
-                <input id="utc_trigger_time" name="utc_trigger_time" type="time" step="1" class="form-control{% if form_errors.utc_trigger_time %} is-invalid{% endif %}" value="{{ form_values.utc_trigger_time or None }}" required>
-                {% if form_errors.utc_trigger_time %}
-                <div class="invalid-feedback">{{ form_errors.utc_trigger_time }}</div>
+                <input id="cronstr" name="cronstr" type="text" class="form-control font-monospace{% if form_errors.cronstr %} is-invalid{% endif %}" value="{{ form_values.cronstr }}" placeholder="0 6 * * *" required>
+                {% if form_errors.cronstr %}
+                <div class="invalid-feedback">{{ form_errors.cronstr }}</div>
+                {% endif %}
+              </div>
+
+              <div class="col-12">
+                <label for="timezone" class="form-label">
+                  <span class="field-label-with-help">
+                    Recurrence timezone
+                    <span class="field-help-icon-wrapper">
+                      <span class="field-help-icon" tabindex="0" aria-label="Timezone field info">i</span>
+                      <span class="field-help-tooltip">The local clock the recurrence is read in. For example, Europe/Amsterdam keeps 06:00 at 06:00 locally when daylight saving changes. Defaults to this asset's timezone. This only sets when polling happens: times are always exchanged with the VTN in UTC.</span>
+                    </span>
+                  </span>
+                </label>
+                <input id="timezone" name="timezone" type="text" list="available-timezones" class="form-control{% if form_errors.timezone %} is-invalid{% endif %}" value="{{ form_values.timezone }}" required>
+                <datalist id="available-timezones">
+                  {% for timezone in available_timezones %}
+                  <option value="{{ timezone }}"></option>
+                  {% endfor %}
+                </datalist>
+                {% if form_errors.timezone %}
+                <div class="invalid-feedback">{{ form_errors.timezone }}</div>
                 {% endif %}
               </div>
 

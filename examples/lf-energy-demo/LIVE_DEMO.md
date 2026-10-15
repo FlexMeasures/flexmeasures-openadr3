@@ -15,7 +15,7 @@ for those; this doc is about *what to click versus what to run*, and in what ord
 | 3 | Seed the capacity-limit event on the VTN | **[CLI]** — no UI equivalent |
 | 4 | Log in, open OpenADR 3 Configuration | **[UI]** |
 | 5 | Create the VEN client | **[UI]** |
-| 6 | Add the polling schedule, then trigger the fetch | **[UI]** + **[CLI]** — no UI trigger |
+| 6 | Add the polling schedule, then trigger the fetch | **[UI]** — or **[CLI]** |
 | 7 | Show the fetched OpenADR sensor values | **[UI]** |
 | 8 | Nest the VEN asset under the campus | **[UI]** (or **[CLI]**) |
 | 9 | Wire the flex-context live | **[UI]** |
@@ -68,13 +68,16 @@ the main menu (or `/flexmeasures-openadr3/dashboard` directly).
 id/secret/token URL — see the main README's Step 7 table for exact values), **Create VEN
 client**.
 
-## 6. Add the polling schedule — [UI], then trigger the fetch — [CLI]
+## 6. Add the polling schedule, then trigger the fetch — [UI]
 
-On the dashboard, **demo-ven** → **Add schedule**: name `demo-poll`, check both import and
-export capacity limits, **Save polling schedule**.
+On the dashboard, **demo-ven** → **Add schedule**: name `demo-poll`, a cron schedule and
+timezone (e.g. `*/5 * * * *`, `UTC`), check both import and export capacity limits,
+**Save polling schedule**. On the polling schedules page, **Automations** opens
+`demo-ven`'s Automations page; open `demo-poll`'s Actions menu and click **Run now** to
+trigger the fetch immediately rather than waiting for the cron schedule.
 
-There's no UI button to run the fetch immediately — trigger it from the host, `cd ..` back
-to `examples/lf-energy-demo` first:
+**[CLI] alternative:** trigger it from the host instead, `cd ..` back to
+`examples/lf-energy-demo` first:
 
 ```bash
 docker compose exec server uv run --active --no-project /walkthrough/python/trigger_fetch.py

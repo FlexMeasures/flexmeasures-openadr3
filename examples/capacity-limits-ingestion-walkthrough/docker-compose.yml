@@ -113,7 +113,7 @@ services:
     volumes:
       # flexmeasures.cfg here sets FLEXMEASURES_SECRETS_ENCRYPTION_KEYS, which
       # FlexMeasures does not read from an environment variable. It must be
-      # identical across server, worker, and cron-scheduler, so all three
+      # identical across server, worker, and automation-runner, so all three
       # bind-mount this same host folder.
       - ./fm-walkthrough-instance:/usr/var/flexmeasures-instance:rw
       - ./fm-walkthrough-instance:/app/instance:rw
@@ -165,7 +165,7 @@ services:
     networks:
       - oadr3-walkthrough
 
-  cron-scheduler:
+  automation-runner:
     build:
       context: ../..
       dockerfile: Dockerfile
@@ -195,10 +195,13 @@ services:
       - ./fm-walkthrough-instance:/app/instance:rw
     entrypoint: ["/bin/sh", "-c"]
     command:
-      # Exactly one instance of this service may run: it's the sole process
-      # driving flexmeasures_openadr3's VEN fetch-events CronScheduler (see
-      # flexmeasures_openadr3/cli.py). Do not scale this service.
-      - flexmeasures oadr3-run-cron-scheduler
+      # Dispatches every automation that is due, once a minute; FlexMeasures claims each
+      # run durably, so a second runner would not run anything twice.
+      - |
+        while :; do
+          sleep "$((60 - $(date +%s) % 60))"
+          flexmeasures jobs run-automations || echo "Automation dispatch failed; retrying next minute" >&2
+        done
     networks:
       - oadr3-walkthrough
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import time  # NOQA: TC003
 from typing import TYPE_CHECKING
 
+from flexmeasures.data.schemas.automations import CronField, TimezoneField
+from marshmallow import ValidationError as MarshmallowValidationError
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from flexmeasures_openadr3.models.forms import (
+    DEFAULT_POLLING_TIMEZONE,
     FormValidationErrors,
     FormValidationResult,
     VenClientFormValues,
@@ -20,6 +22,15 @@ if TYPE_CHECKING:
 def _parse_csv_values(raw_value: str) -> list[str]:
     """Parse a comma-separated string into a list of trimmed, non-empty values."""
     return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def _deserialize_with(field: CronField | TimezoneField, value: str) -> str:
+    """Validate a value the way FlexMeasures validates it for automations."""
+    try:
+        return str(field.deserialize(value.strip()))
+    except MarshmallowValidationError as exc:
+        messages = exc.messages if isinstance(exc.messages, list) else [str(exc.messages)]
+        raise ValueError(" ".join(str(message) for message in messages)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +81,8 @@ class VenSensorConfigFormData(BaseModel):
 
     name: str
     targets: list[str] = Field(default_factory=list)
-    utc_trigger_time: time
+    cronstr: str
+    timezone: str = DEFAULT_POLLING_TIMEZONE
     fetch_import_capacity_limits: bool = False
     fetch_export_capacity_limits: bool = False
 
@@ -84,6 +96,16 @@ class VenSensorConfigFormData(BaseModel):
         if isinstance(value, tuple):
             return [item.strip() for item in value if item.strip()]
         return [item.strip() for item in value if item.strip()]
+
+    @field_validator("cronstr")
+    @classmethod
+    def _validate_cronstr(cls, value: str) -> str:
+        return _deserialize_with(CronField(), value)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        return _deserialize_with(TimezoneField(), value)
 
     @classmethod
     def from_post_values(cls, post_values: VenSensorConfigPostValues) -> VenSensorConfigFormData:
@@ -137,12 +159,14 @@ def build_ven_sensor_config_form_values(
         source = ven_client.sensor_configs[-1]
 
     if source is None:
-        return VenSensorConfigFormValues.empty()
+        # As FlexMeasures' own automation form does, a new schedule follows the asset's local clock by default.
+        return VenSensorConfigFormValues(timezone=ven_client.asset.timezone)
 
     return VenSensorConfigFormValues(
         name=source.name,
         targets=", ".join(source.targets),
-        utc_trigger_time=source.utc_trigger_time,
+        cronstr=source.cronstr,
+        timezone=source.timezone,
         fetch_import_capacity_limits=("on" if source.fetch_import_capacity_limits else ""),
         fetch_export_capacity_limits=("on" if source.fetch_export_capacity_limits else ""),
     )

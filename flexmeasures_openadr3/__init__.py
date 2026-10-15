@@ -8,12 +8,14 @@ from flask.blueprints import BlueprintSetupState
 from importlib_metadata import PackageNotFoundError
 from importlib_metadata import version as pkg_version
 from packaging.version import Version
+from pytz import all_timezones
 
-from flexmeasures_openadr3.cli import oadr3_run_cron_scheduler
+from flexmeasures_openadr3.automations import FETCH_EVENTS_AUTOMATION
 
 from .utils.blueprints import ensure_bp_routes_are_loaded_fresh
 
 __version__ = "2.0"
+__automation_types__ = [FETCH_EVENTS_AUTOMATION]
 
 
 """
@@ -59,6 +61,12 @@ OPENADR_MENU_REGISTRATION = MenuRegistration(
 )
 
 
+@flexmeasures_openadr3_ui_bp.context_processor
+def inject_available_timezones() -> dict[str, list[str]]:
+    """Offer the timezone names FlexMeasures' own automation form suggests."""
+    return {"available_timezones": all_timezones}
+
+
 @flexmeasures_openadr3_ui_bp.record_once
 def register_menu_item(setup_state: BlueprintSetupState) -> None:
     """Register the OpenADR 3 dashboard in the FlexMeasures sidebar menu."""
@@ -74,9 +82,3 @@ def register_menu_item(setup_state: BlueprintSetupState) -> None:
         **app.config.get("FLEXMEASURES_MENU_LISTED_VIEW_ICONS", {}),
         registration.view_key: registration.icon,
     }
-
-
-@flexmeasures_openadr3_ui_bp.record_once
-def register_cli_commands(setup_state: BlueprintSetupState) -> None:
-    """Register the dedicated cron-scheduler CLI command on the FlexMeasures app."""
-    setup_state.app.cli.add_command(oadr3_run_cron_scheduler)

@@ -1,25 +1,21 @@
-"""End-to-end test: VTN capacity events -> FlexMeasures VEN fetch job -> sensor beliefs."""
+"""End-to-end test: VTN capacity events -> FlexMeasures fetch-events automation -> sensor beliefs."""
 
 from __future__ import annotations
-
-from datetime import time
 
 import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flexmeasures.data.models.automations import Automation
 from flexmeasures.data.models.time_series import TimedBelief
-from flexmeasures.data.services.data_sources import get_or_create_source
+from flexmeasures.data.services.automations import run_automation
+from flexmeasures.utils.job_utils import work_on_rq
 from openadr3_client.oadr310.models.event.event import ExistingEvent
 from openadr3_client.oadr310.models.event.event_payload import EventPayloadType
+from rq.job import Job
 from sqlalchemy import select
 
 from flexmeasures_openadr3.utils.ven_client_forms import VenClientFormData, VenSensorConfigFormData
 from flexmeasures_openadr3.utils.ven_clients import VenClientRepository
-from flexmeasures_openadr3.utils.ven_jobs import (
-    OPENADR_EVENT_SOURCE_NAME,
-    OPENADR_EVENT_SOURCE_TYPE,
-    _execute_fetch_events,
-)
 from tests.test_container.integration_types import IntegrationTestVTNClient
 
 
@@ -37,20 +33,22 @@ def _build_ven_client_form_data(
     )
 
 
-def _run_fetch_job_immediately(app: Flask, ven_id: int, config_name: str) -> None:
-    """Invoke the fetch-events worker logic synchronously (skip RQ schedule delay)."""
-    with app.app_context():
-        _execute_fetch_events(ven_id, config_name)
+def _run_automation_now(app: Flask, automation: Automation) -> Job:
+    """Queue a run of the automation, as *Run now* does, and work it off the ingestion queue right away."""
+    result = run_automation(automation)
+    assert result is not None
+    job = Job.fetch(result["job_id"], connection=app.redis_connection)
+    work_on_rq(app.queues["ingestion"], job=job)
+    job.refresh()
+    assert job.is_finished, job.exc_info
+    return job
 
 
-def _beliefs_for_sensor(db: SQLAlchemy, sensor_id: int) -> list[TimedBelief]:
-    source = get_or_create_source(
-        source=OPENADR_EVENT_SOURCE_NAME,
-        source_type=OPENADR_EVENT_SOURCE_TYPE,
-    )
-    return list(db.session.scalars(select(TimedBelief).filter_by(sensor_id=sensor_id, source_id=source.id).order_by(TimedBelief.event_start)).all())
+def _beliefs_for_sensor(db: SQLAlchemy, sensor_id: int, source_id: int) -> list[TimedBelief]:
+    return list(db.session.scalars(select(TimedBelief).filter_by(sensor_id=sensor_id, source_id=source_id).order_by(TimedBelief.event_start)).all())
 
 
+@pytest.mark.usefixtures("clean_queues")
 def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     app: Flask,
     logged_in_prosumer: object,  # noqa: ARG001
@@ -66,7 +64,8 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     with 96 fifteen-minute intervals, each carrying IMPORT/EXPORT_CAPACITY_LIMIT
     payloads. The event starts one hour after the session fixture is created.
 
-    The fetch job stores one TimedBelief per interval at the interval start on dedicated
+    Running the polling schedule's automation queues a job on the ingestion queue, which
+    stores one TimedBelief per interval at the interval start on dedicated
     import/export sensors (15-minute sensor resolution). Assertions verify belief count,
     that each belief falls within its seed interval, payload values match, and that
     event_start times run from the first interval start through the last interval start.
@@ -78,7 +77,8 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     schedule_form = VenSensorConfigFormData(
         name="e2e-poll",
         targets=[],
-        utc_trigger_time=time.fromisoformat("00:00:00"),
+        cronstr="0 0 * * *",
+        timezone="UTC",
         fetch_import_capacity_limits=True,
         fetch_export_capacity_limits=True,
     )
@@ -92,14 +92,23 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     assert config.import_sensor is not None
     assert config.export_sensor is not None
 
-    # --- Run fetch job immediately (do not wait for the daily RQ trigger) ---
-    _run_fetch_job_immediately(app, ven.id, config.name)
+    # --- Run the automation now (do not wait for its cron schedule) ---
+    automation = config.automation
+    job = _run_automation_now(app, automation)
 
     # --- Assert beliefs on import/export sensors ---
-    import_beliefs = _beliefs_for_sensor(fresh_db, config.import_sensor.id)
-    export_beliefs = _beliefs_for_sensor(fresh_db, config.export_sensor.id)
+    source_id = automation.generator_id
+    import_beliefs = _beliefs_for_sensor(fresh_db, config.import_sensor.id, source_id)
+    export_beliefs = _beliefs_for_sensor(fresh_db, config.export_sensor.id, source_id)
 
     expected_count = len(seed.intervals or ())
+    assert sorted(job.result, key=lambda saved: saved["sensor_id"]) == sorted(
+        [
+            {"sensor_id": config.import_sensor.id, "n_rows": expected_count},
+            {"sensor_id": config.export_sensor.id, "n_rows": expected_count},
+        ],
+        key=lambda saved: saved["sensor_id"],
+    )
     assert len(import_beliefs) == expected_count
     assert len(export_beliefs) == expected_count
 
@@ -138,3 +147,8 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
 
     assert min_start == initial_interval.interval_period.start
     assert max_start == last_interval.interval_period.start
+
+    # --- Fetching the same events again records nothing new ---
+    rerun = _run_automation_now(app, automation)
+    assert all(saved["n_rows"] == 0 for saved in rerun.result)
+    assert len(_beliefs_for_sensor(fresh_db, config.import_sensor.id, source_id)) == expected_count

@@ -7,7 +7,7 @@ Scripts for the [capacity-limits walkthrough](../README.md). `seed_events.py` an
 | Script | Run where | Run with | Purpose |
 | --- | --- | --- | --- |
 | `seed_events.py` | Host machine | `uv run seed_events.py` | Create a 24h capacity-limit event on the VTN (BL OAuth client) |
-| `trigger_fetch.py` | FlexMeasures container | `uv run --active --no-project trigger_fetch.py` | Run the fetch job immediately for `demo-ven` / `demo-poll` |
+| `trigger_fetch.py` | FlexMeasures container | `uv run --active --no-project trigger_fetch.py` | Queue a run of the `demo-poll` automation for `demo-ven` and wait for the `worker` to finish it |
 | `settings.py` | — | — | Shared URLs and form values |
 
 `seed_events.py` declares its dependencies inline (PEP 723) and uv resolves them into

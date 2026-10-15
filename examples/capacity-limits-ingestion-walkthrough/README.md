@@ -116,7 +116,8 @@ On the dashboard, open **demo-ven** → **Add schedule** (or **Polling schedules
 |-------|-------|
 | **Name** | `demo-poll` |
 | **Targets** | *(leave empty — fetch all events)* |
-| **Daily trigger time (UTC)** | See options below |
+| **Schedule (cron)** | See options below |
+| **Timezone** | `UTC` |
 | **Import capacity limits** | ✓ checked |
 | **Export capacity limits** | ✓ checked |
 
@@ -127,13 +128,17 @@ Click **Save polling schedule**. The plugin creates two sensors on the VEN asset
 
 ### When to run the fetch
 
-The schedule runs **once per day** at the configured UTC time. For this walkthrough you have two options:
+The schedule is a FlexMeasures automation that runs on the configured cron
+expression, in the configured timezone. For this walkthrough you have two options:
 
 #### Option A — Trigger immediately (recommended)**
 
-Skip waiting for the daily schedule and run the fetch now. `--active --no-project`
-tells `uv run` to reuse the container's own venv (`/app/.venv`, where `flexmeasures`
-and `flexmeasures_openadr3` are already installed) instead of resolving a fresh one:
+Skip waiting for the schedule and run the fetch now. Either click **Run now** in the
+automation's Actions menu on the VEN asset's **Automations** page, or use
+`trigger_fetch.py`, which queues the same run and waits for the `worker` to finish
+it. `--active --no-project` tells `uv run` to reuse the container's own venv
+(`/app/.venv`, where `flexmeasures` and `flexmeasures_openadr3` are already
+installed) instead of resolving a fresh one:
 
 ```bash
 docker compose exec server uv run --active --no-project /walkthrough/python/trigger_fetch.py
@@ -141,11 +146,11 @@ docker compose exec server uv run --active --no-project /walkthrough/python/trig
 
 #### Option B — Wait for the scheduled job**
 
-Set **Daily trigger time** to a UTC time 2–3 minutes from now, then save. Ensure the
-`cron-scheduler` container is running — it's the dedicated process that evaluates
-polling schedules and enqueues fetch jobs onto the `ingestion` queue at the
-configured trigger time. The `worker` container must also be running — it's what
-processes that queue.
+Set **Schedule (cron)** to a few minutes from now (e.g. `*/5 * * * *` to run every
+5 minutes), then save. Ensure the `automation-runner` container is running — it's
+the dedicated process that runs `flexmeasures jobs run-automations` once a minute
+and enqueues fetch jobs onto the `ingestion` queue when the cron schedule is due.
+The `worker` container must also be running — it's what processes that queue.
 
 ---
 
@@ -184,9 +189,10 @@ Fetched DR events for VEN 'demo-ven' … stored 192 beliefs.
 | Seed script cannot reach VTN | `docker compose ps` — is `openleadr-vtn` running? Wait ~30s after startup. |
 | OAuth errors in seed script | Keycloak at `http://localhost:8080` — realm imported? |
 | VEN client save fails | URLs must use Docker service names (`openleadr-vtn`, `keycloak`), not `localhost`. |
-| Fetch job never runs | `docker compose ps` — both `cron-scheduler` (evaluates the schedule) and `worker` (processes the `ingestion` queue) must be up. |
+| Fetch job never runs | `docker compose ps` — both `automation-runner` (runs due automations) and `worker` (processes the `ingestion` queue) must be up. |
 | No beliefs after fetch | Re-run `seed_events.py`; event must exist on VTN before fetch. |
 | HTTP blocked to VTN | `ALLOW_INSECURE_HTTP_VTN=true` is set in `docker-compose.yml`. |
+| Run fails / shows an error | Check the automation's recent runs on the VEN asset's **Automations** page; check `docker compose logs worker` if helpful. |
 
 ## Reference values
 

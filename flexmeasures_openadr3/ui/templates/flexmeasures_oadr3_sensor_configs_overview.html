@@ -8,16 +8,20 @@
     <h2 class="mb-0">Polling schedules for {{ ven_client.name }}</h2>
     <div class="d-flex gap-2">
       <a href="{{ url_for('.ven_client_sensor_config_new', ven_id=ven_client.id) }}" class="btn btn-primary">Add schedule</a>
+      <a href="/assets/{{ ven_client.id }}/automations" class="btn btn-outline-secondary">Automations</a>
       <a href="{{ url_for('.ven_client_detail', ven_id=ven_client.id) }}" class="btn btn-outline-secondary">Back to VEN client</a>
     </div>
   </div>
 
   <div class="alert alert-light border mb-4" role="note">
     A <strong>polling schedule</strong> defines when and what to fetch from the VTN using
-    the HTTP polling interface. Each schedule runs daily at the configured trigger time,
-    retrieves DR events matching the specified targets, and stores the resulting
-    capacity-limit beliefs in FlexMeasures sensors. You can create multiple schedules per
-    VEN client &mdash; for example, to poll different targets or limit types independently.
+    the HTTP polling interface. Each schedule is a FlexMeasures <strong>automation</strong> on the
+    VEN client's asset: whenever its cron schedule is due, it retrieves DR events matching the
+    specified targets and stores the resulting capacity-limit beliefs in FlexMeasures sensors.
+    You can create multiple schedules per VEN client &mdash; for example, to poll different
+    targets or limit types independently. Use the asset's
+    <a href="/assets/{{ ven_client.id }}/automations">Automations</a> page to run a schedule now,
+    (de)activate it, or inspect its recent runs.
   </div>
 
   <div class="card">
@@ -28,7 +32,8 @@
           <thead>
             <tr>
               <th>Name</th>
-              <th>Trigger (UTC)</th>
+              <th>Schedule</th>
+              <th>Status</th>
               <th>Targets</th>
               <th>Limits</th>
               <th>Sensors</th>
@@ -39,7 +44,17 @@
             {% for cfg in sensor_configs %}
             <tr>
               <td>{{ cfg.config_name }}</td>
-              <td>{{ cfg.utc_trigger_time }}</td>
+              <td>
+                <div>{{ cfg.schedule_description }}</div>
+                <div class="text-muted small"><code>{{ cfg.cronstr }}</code> ({{ cfg.timezone }})</div>
+              </td>
+              <td>
+                {% if cfg.active %}
+                <span class="badge bg-success">active</span>
+                {% else %}
+                <span class="badge bg-secondary">inactive</span>
+                {% endif %}
+              </td>
               <td>{% if cfg.targets %}{{ cfg.targets | join(", ") }}{% else %}—{% endif %}</td>
               <td>
                 {% if cfg.fetch_import_capacity_limits and cfg.fetch_export_capacity_limits %}
