@@ -24,8 +24,8 @@ FlexMeasures registers the BluePrint objects it finds in here.
 
 try:
     _fm_version = pkg_version("flexmeasures")
-    if Version(_fm_version) < Version("1.0.0.dev0"):
-        warnings.warn(f"flexmeasures-openadr3 requires FlexMeasures >= v1.0.0, but version {_fm_version} is installed.", stacklevel=2)
+    if Version(_fm_version) < Version("1.1.0.dev0"):
+        warnings.warn(f"flexmeasures-openadr3 requires FlexMeasures >= v1.1.0, but version {_fm_version} is installed.", stacklevel=2)
 except PackageNotFoundError:
     pass
 

@@ -23,7 +23,7 @@ classifiers = [
 ]
 version = "2.0"
 dependencies = [
-    "flexmeasures>=1.0.0", # introduces the ingestion queue and platform secrets (asset.secrets)
+    "flexmeasures>=1.1.0.dev0", # introduces plugin-defined automations
     "openadr3-client>=2.1.0",
 ]
 
@@ -41,6 +41,10 @@ include = [
 ]
 
 # UV-specific configuration
+[tool.uv.sources]
+# Plugin-defined automations are not in a FlexMeasures release yet.
+flexmeasures = { git = "https://github.com/FlexMeasures/flexmeasures", branch = "main" }
+
 [tool.uv]
 environments = [
     "sys_platform == 'darwin'",
