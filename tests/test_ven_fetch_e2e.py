@@ -102,7 +102,7 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
     export_beliefs = _beliefs_for_sensor(fresh_db, config.export_sensor.id, source_id)
 
     expected_count = len(seed.intervals or ())
-    assert sorted(job.result, key=lambda saved: saved["sensor_id"]) == sorted(
+    assert sorted(job.return_value(), key=lambda saved: saved["sensor_id"]) == sorted(
         [
             {"sensor_id": config.import_sensor.id, "n_rows": expected_count},
             {"sensor_id": config.export_sensor.id, "n_rows": expected_count},
@@ -150,5 +150,5 @@ def test_ven_fetch_events_e2e_stores_openadr_capacity_limits(
 
     # --- Fetching the same events again records nothing new ---
     rerun = _run_automation_now(app, automation)
-    assert all(saved["n_rows"] == 0 for saved in rerun.result)
+    assert all(saved["n_rows"] == 0 for saved in rerun.return_value())
     assert len(_beliefs_for_sensor(fresh_db, config.import_sensor.id, source_id)) == expected_count

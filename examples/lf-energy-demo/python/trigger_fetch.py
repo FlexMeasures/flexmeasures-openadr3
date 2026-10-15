@@ -71,7 +71,7 @@ def main() -> None:
             job.refresh()
 
         if job.is_finished:
-            saved = ", ".join(f"{row['n_rows']} on sensor {row['sensor_id']}" for row in job.result) or "nothing new"
+            saved = ", ".join(f"{row['n_rows']} on sensor {row['sensor_id']}" for row in job.return_value()) or "nothing new"
             print(f"Fetch complete: saved {saved}.")
         elif job.is_failed:
             print(f"Fetch failed:\n{job.latest_result().exc_string}", file=sys.stderr)
